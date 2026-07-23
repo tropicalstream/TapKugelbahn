@@ -130,10 +130,13 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         physAcc += dt
         while (physAcc >= PHYS_DT) { step(PHYS_DT); physAcc -= PHYS_DT }
 
-        // rolling loop follows the lead ball's speed
-        val lead = leadBall()
-        if (lead != null && !lead.dropping && lead.pauseT <= 0f) {
-            host.rolling(true, (0.7f + lead.v * 0.18f).coerceIn(0.6f, 1.8f), (0.25f + lead.v * 0.1f).coerceAtMost(0.8f))
+        // rolling bed: as long as ANY ball is rolling, the machine is heard —
+        // rate and volume ride the fastest one
+        val rolling = balls.filter { !it.dropping && it.pauseT <= 0f }.maxByOrNull { it.v }
+        if (rolling != null) {
+            host.rolling(true,
+                (0.7f + rolling.v * 0.18f).coerceIn(0.6f, 1.9f),
+                (0.45f + rolling.v * 0.12f).coerceAtMost(1f))
         } else host.rolling(false, 1f, 0f)
     }
 

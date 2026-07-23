@@ -204,8 +204,11 @@ class TrackBuilder {
         yaw += angle
     }
 
-    /** Vertical loop-the-loop in the travel plane, radius r, lateral shift so exit clears entry. */
+    /** Vertical loop-the-loop in the travel plane, radius r, lateral shift so
+     *  exit clears entry. Rail momentum carries the ball around at speed —
+     *  the energy model alone would crawl over the top in slow motion. */
     fun loop(r: Float) {
+        val s0 = approxS
         val dx = sin(yaw); val dz = cos(yaw)
         val lx = cos(yaw); val lz = -sin(yaw)     // lateral
         val sx = x; val sy = y; val sz = z
@@ -218,6 +221,7 @@ class TrackBuilder {
             val side = 2.6f * BALL_R * t
             emit(sx + dx * fwd + lx * side, sy + up, sz + dz * fwd + lz * side)
         }
+        zones.add(Zone(s0 - 0.15f, approxS, Z_FERRIS, speed = 3.1f))
     }
 
     /** Helix (corkscrew / spiral): turns full rotations, total drop, radius r. */
@@ -279,17 +283,26 @@ class TrackBuilder {
         notes.add(Note(approxS, S_CLACK, 0.7f, 0.7f))
     }
 
-    /** Xylophone stairs: each step a glowing bar and an ascending note. */
+    /** Xylophone stairs: the ball HOPS bar to bar — a ballistic arc onto each
+     *  glowing bar, a note ringing out at every landing. */
     fun xylophone(hue: Float, steps: Int = 6) {
         val scale = floatArrayOf(1.0f, 1.122f, 1.26f, 1.335f, 1.498f, 1.682f, 1.888f, 2.0f)
         for (i in 0 until steps) {
-            straight(0.42f, -0.02f)
-            // bar under the drop lip
+            val fx = sin(yaw); val fz = cos(yaw)
             val lx = cos(yaw); val lz = -sin(yaw)
+            val sx = x; val sy = y; val sz = z
+            val hop = 0.5f; val drop = 0.17f; val arc = 0.085f
+            val n = 10
+            for (k in 1..n) {
+                val t = k.toFloat() / n
+                emit(sx + fx * hop * t, sy + arc * 4f * t * (1f - t) - drop * t, sz + fz * hop * t)
+            }
+            // the bar exactly under the landing — the strike you can see
             val c = accent((hue + i * 0.09f) % 1f, 0.95f)
-            line(x - lx * 0.34f, y - 0.06f, z - lz * 0.34f, x + lx * 0.34f, y - 0.06f, z + lz * 0.34f, c)
-            line(x - lx * 0.34f, y - 0.10f, z - lz * 0.34f, x + lx * 0.34f, y - 0.10f, z + lz * 0.34f, c)
-            straight(0.14f, -0.16f)
+            line(x - lx * 0.34f, y - 0.05f, z - lz * 0.34f, x + lx * 0.34f, y - 0.05f, z + lz * 0.34f, c)
+            line(x - lx * 0.34f, y - 0.09f, z - lz * 0.34f, x + lx * 0.34f, y - 0.09f, z + lz * 0.34f, c)
+            line(x - lx * 0.34f, y - 0.09f, z - lz * 0.34f, x - lx * 0.34f, y - 0.05f, z - lz * 0.34f, c)
+            line(x + lx * 0.34f, y - 0.09f, z + lz * 0.34f, x + lx * 0.34f, y - 0.05f, z + lz * 0.34f, c)
             notes.add(Note(approxS, S_XYLO, scale[i % scale.size] * 0.75f))
         }
     }
@@ -301,30 +314,40 @@ class TrackBuilder {
         }
     }
 
-    /** Pachinko field: zigzag through a grid of pins. */
+    /** Pachinko field: the ball CAROMS pin to pin — sharp deflections at every
+     *  pin it strikes, a plink per hit, pins drawn exactly where it lands. */
     fun pachinko(hue: Float, rows: Int = 5) {
-        val c = accent(hue, 0.8f)
+        val c = accent(hue, 0.9f)
+        val dim = accent(hue, 0.35f)
         val lx = cos(yaw); val lz = -sin(yaw)
-        // pin grid art around the descent corridor
-        val px0 = x; val py0 = y; val pz0 = z
         val fx = sin(yaw); val fz = cos(yaw)
+        // backdrop pin lattice either side of the caroming path
+        val px0 = x; val py0 = y; val pz0 = z
         for (r in 0 until rows) for (k in -2..2) {
-            val gx = px0 + fx * (0.35f + r * 0.34f) + lx * k * 0.3f
-            val gy = py0 - 0.15f - r * 0.3f
-            val gz = pz0 + fz * (0.35f + r * 0.34f) + lz * k * 0.3f
-            line(gx - lx * 0.05f, gy, gz - lz * 0.05f, gx + lx * 0.05f, gy, gz + lz * 0.05f, c)
-            line(gx, gy - 0.05f, gz, gx, gy + 0.05f, gz, c)
+            if (k == 0) continue
+            val gx = px0 + fx * (0.34f + r * 0.34f) + lx * k * 0.3f
+            val gy = py0 - 0.13f - r * 0.26f
+            val gz = pz0 + fz * (0.34f + r * 0.34f) + lz * k * 0.3f
+            line(gx - lx * 0.045f, gy, gz - lz * 0.045f, gx + lx * 0.045f, gy, gz + lz * 0.045f, dim)
+            line(gx, gy - 0.045f, gz, gx, gy + 0.045f, gz, dim)
         }
+        var side = 1f
         for (r in 0 until rows) {
-            val dirSign = if (r % 2 == 0) 1f else -1f
-            val nn = 8
+            // a small ballistic flight that ENDS on a pin — visible impact
             val sx = x; val sy = y; val sz = z
-            for (i in 1..nn) {
-                val t = i.toFloat() / nn
-                emit(sx + fx * 0.34f * t + lx * dirSign * 0.30f * sin(t * PI.toFloat()),
-                    sy - 0.30f * t, sz + fz * 0.34f * t + lz * dirSign * 0.30f * sin(t * PI.toFloat()))
+            val n = 8
+            for (k in 1..n) {
+                val t = k.toFloat() / n
+                emit(sx + fx * 0.34f * t + lx * side * 0.24f * t,
+                    sy + 0.035f * 4f * t * (1f - t) - 0.26f * t,
+                    sz + fz * 0.34f * t + lz * side * 0.24f * t)
             }
-            notes.add(Note(approxS, S_CLACK, 1.3f + 0.25f * (r % 3), 0.8f))
+            // the struck pin, right under the ball's carom point
+            line(x - lx * 0.06f, y - BALL_R * 0.9f, z - lz * 0.06f,
+                x + lx * 0.06f, y - BALL_R * 0.9f, z + lz * 0.06f, c)
+            line(x, y - BALL_R * 0.9f - 0.06f, z, x, y - BALL_R * 0.9f + 0.06f, z, c)
+            notes.add(Note(approxS, S_CLACK, 1.25f + 0.22f * (r % 3), 0.95f))
+            side = -side
         }
     }
 
@@ -435,8 +458,11 @@ class TrackBuilder {
         mechs.add(Mech(M_SCREW, x, y, z, yaw, len, rise, hue))
         straight(len, rise, step = 0.06f)
         zones.add(Zone(s0, approxS, Z_LIFT, speed = 0.45f))
-        notes.add(Note(s0 + 0.3f, S_RATCHET, 1.2f, 0.6f))
-        notes.add(Note(s0 + 1.2f, S_RATCHET, 1.2f, 0.6f))
+        var tick = 0.2f
+        while (tick < len) {
+            notes.add(Note(s0 + tick, S_RATCHET, 1.18f + (tick % 0.09f), 0.6f))
+            tick += 0.38f
+        }
     }
 
     /** Trommel: ball rolls through a big rotating wire drum. */
@@ -483,8 +509,12 @@ class TrackBuilder {
         val sx = x; val sz = z
         for (i in 1..n) emit(sx, baseY + rise * i / n, sz)
         zones.add(Zone(sClimb - 0.4f, approxS, Z_LIFT, speed = 0.75f))
-        notes.add(Note(sClimb + rise * 0.3f, S_RATCHET, 1f, 0.8f))
-        notes.add(Note(sClimb + rise * 0.7f, S_RATCHET, 1.05f, 0.8f))
+        // the chain ticks the whole way up
+        var tick = 0.25f
+        while (tick < rise) {
+            notes.add(Note(sClimb + tick, S_RATCHET, 0.96f + (tick % 0.13f), 0.75f))
+            tick += 0.42f
+        }
         // crest and short chute back to the intake point
         straight(0.3f, -0.1f)
         val ddx = intakeX - x; val ddz = intakeZ - z

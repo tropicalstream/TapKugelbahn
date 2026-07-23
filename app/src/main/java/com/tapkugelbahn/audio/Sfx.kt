@@ -34,21 +34,23 @@ class Sfx(private val context: Context) {
         ).build()
 
     private val ids = IntArray(COUNT)
-    @Volatile private var loaded = false
+    @Volatile private var loadedCount = 0
+    private val loaded get() = loadedCount >= COUNT   // decoded, not just queued
     @Volatile var volume = 0.9f
     private var rollStream = 0
     private var rollOn = false
 
     fun loadAsync() {
-        Thread {
-            ids[ROLL] = pool.load(context, R.raw.roll_loop, 1)
-            ids[CLACK] = pool.load(context, R.raw.clack, 1)
-            ids[XYLO] = pool.load(context, R.raw.xylo, 1)
-            ids[RATCHET] = pool.load(context, R.raw.ratchet, 1)
-            ids[DING] = pool.load(context, R.raw.ding, 1)
-            ids[DROP] = pool.load(context, R.raw.drop, 1)
-            loaded = true
-        }.start()
+        // SoundPool decodes asynchronously: only count a sample once its
+        // decode COMPLETES (playing a queued-but-undecoded id is silently
+        // dropped with "not READY" — the whole machine ran mute that way).
+        pool.setOnLoadCompleteListener { _, _, status -> if (status == 0) loadedCount++ }
+        ids[ROLL] = pool.load(context, R.raw.roll_loop, 1)
+        ids[CLACK] = pool.load(context, R.raw.clack, 1)
+        ids[XYLO] = pool.load(context, R.raw.xylo, 1)
+        ids[RATCHET] = pool.load(context, R.raw.ratchet, 1)
+        ids[DING] = pool.load(context, R.raw.ding, 1)
+        ids[DROP] = pool.load(context, R.raw.drop, 1)
     }
 
     fun play(id: Int, pitch: Float, vol: Float) {
