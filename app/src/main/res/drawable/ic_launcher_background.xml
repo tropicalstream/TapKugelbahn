@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep synth-space -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="54" android:centerY="48" android:gradientRadius="80">
+                <item android:offset="0.0" android:color="#FF231046" />
+                <item android:offset="0.6" android:color="#FF0C0722" />
+                <item android:offset="1.0" android:color="#FF03010A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Perspective grid tunnel converging to a vanishing point -->
+    <path android:strokeColor="#552CE0FF" android:strokeWidth="1.4" android:pathData="M-4,108 L54,50 M22,108 L54,50 M54,108 L54,50 M86,108 L54,50 M112,108 L54,50" />
+    <path android:strokeColor="#3541D0FF" android:strokeWidth="1.4" android:pathData="M-4,0 L54,50 M112,0 L54,50" />
+    <!-- perspective rungs -->
+    <path android:strokeColor="#66FF3CD0" android:strokeWidth="2" android:pathData="M2,104 L106,104" />
+    <path android:strokeColor="#55FF3CD0" android:strokeWidth="1.6" android:pathData="M14,90 L94,90" />
+    <path android:strokeColor="#442CE0FF" android:strokeWidth="1.4" android:pathData="M24,78 L84,78" />
+    <path android:strokeColor="#332CE0FF" android:strokeWidth="1.2" android:pathData="M32,68 L76,68" />
+</vector>
