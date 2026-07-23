@@ -212,23 +212,15 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         }
     }
 
-    /** WIN: this ball and an earlier, overlapping, untouched ball both finished. */
+    /** The level is complete the moment the player's ball finishes its round —
+     *  the machine is the show; no further objective stands in the way. */
     private fun checkObjective(b: Ball) {
-        if (state != GameState.RUN || b.touched || b.dropTime < 0f) return
-        for (a in balls) {
-            if (a === b || a.touched || !a.finished || a.dropTime < 0f) continue
-            // the pair overlapped: the later drop happened before the earlier finisher was done
-            val first = if (a.dropTime <= b.dropTime) a else b
-            val second = if (first === a) b else a
-            if (second.dropTime < first.finishTime || first.finishTime < 0f) {
-                completed = true
-                state = GameState.COMPLETE
-                winFlash = 3f
-                store.reached = maxOf(store.reached, level + 1)
-                host.sfx(S_XYLO, 1.5f, 1f); host.sfx(S_DING, 1.2f, 1f)
-                return
-            }
-        }
+        if (state != GameState.RUN || b.dropTime < 0f) return
+        completed = true
+        state = GameState.COMPLETE
+        winFlash = 3f
+        store.reached = maxOf(store.reached, level + 1)
+        host.sfx(S_XYLO, 1.5f, 1f); host.sfx(S_DING, 1.2f, 1f)
     }
 
     private fun crossed(s0: Float, s1: Float, mark: Float, len: Float): Boolean {

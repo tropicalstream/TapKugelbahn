@@ -51,7 +51,9 @@ class Mech(
     val a: Float, val b: Float, // size params (radius / length etc.)
     val hue: Float,
     var phase: Float = 0f,      // animation phase, advanced by renderer
-    var trigger: Float = -1f    // time of last trigger (cradle swing, bucket tip)
+    var trigger: Float = -1f,   // time of last trigger (cradle swing, bucket tip)
+    var s0: Float = -1f,        // the mechanism's span on the track, so its
+    var s1: Float = -1f         // animation can lock onto the ball riding it
 )
 
 class MachineModel(
@@ -224,13 +226,15 @@ class TrackBuilder {
         zones.add(Zone(s0 - 0.15f, approxS, Z_FERRIS, speed = 3.1f))
     }
 
-    /** Helix (corkscrew / spiral): turns full rotations, total drop, radius r. */
+    /** Helix (corkscrew / spiral): turns full rotations, total drop, radius r.
+     *  The ball gathers speed lap over lap on the way down, as it should. */
     fun helix(r: Float, turns: Float, drop: Float, clockwise: Boolean = true) {
         val dir = if (clockwise) 1f else -1f
         val cx = x - sin(yaw + dir * PI.toFloat() / 2) * r
         val cz = z - cos(yaw + dir * PI.toFloat() / 2) * r
         val a0 = yaw + dir * -PI.toFloat() / 2
         val sy = y
+        val sHelix = approxS
         val n = (turns * 48).toInt().coerceAtLeast(12)
         for (i in 1..n) {
             val t = i.toFloat() / n
@@ -239,6 +243,11 @@ class TrackBuilder {
         }
         yaw += dir * turns * 2f * PI.toFloat()
         yaw = ((yaw % (2f * PI.toFloat())) + 2f * PI.toFloat()) % (2f * PI.toFloat())
+        val helixLen = approxS - sHelix
+        for (k in 0 until 4) {
+            zones.add(Zone(sHelix + helixLen * k / 4f, sHelix + helixLen * (k + 1) / 4f,
+                Z_FERRIS, speed = 1.35f + k * 0.5f))
+        }
     }
 
     // ------------------------------------------------------- mechanisms
@@ -262,6 +271,7 @@ class TrackBuilder {
         val cx0 = x + sin(yaw) * 1.05f
         val cz0 = z + cos(yaw) * 1.05f
         val topY = y
+        val sSpiral = approxS
         // spiral in: radius 1.05 → 0.2 over 2.6 turns, dropping 0.9
         val turns = 2.6f; val n = (turns * 56).toInt()
         val a0 = yaw + PI.toFloat()
@@ -270,6 +280,13 @@ class TrackBuilder {
             val r = 1.05f - 0.85f * t
             val a = a0 + turns * 2f * PI.toFloat() * t
             emit(cx0 + sin(a) * r, topY - 0.9f * t * t, cz0 + cos(a) * r)
+        }
+        // coin-funnel physics: as the orbit tightens it QUICKENS — the
+        // signature ever-faster whirl into the throat
+        val spiralLen = approxS - sSpiral
+        for (k in 0 until 5) {
+            zones.add(Zone(sSpiral + spiralLen * k / 5f, sSpiral + spiralLen * (k + 1) / 5f,
+                Z_FERRIS, speed = 1.25f + k * 0.55f))
         }
         // cone art
         val c = accent(hue, 0.5f)
@@ -358,10 +375,11 @@ class TrackBuilder {
         val c = steel(0.9f); val fr = accent(hue, 0.8f)
         val lx = cos(yaw); val lz = -sin(yaw)
         val fx = sin(yaw); val fz = cos(yaw)
-        // frame + 5 hanging balls over the track ahead
+        // frame + the three RESTING middle balls; the end pendulums are drawn
+        // live by the renderer so they can really swing on impact
         val topY = y + 0.55f
         line(x - fx * 0.1f, topY, z - fz * 0.1f, x + fx * 1.1f, topY, z + fz * 1.1f, fr)
-        for (i in 0 until 5) {
+        for (i in 1 until 4) {
             val bx = x + fx * (0.3f + i * 0.12f); val bz = z + fz * (0.3f + i * 0.12f)
             line(bx, topY, bz, bx, y + BALL_R, bz, c)
             diamond(bx, y + BALL_R * 0.5f, bz, BALL_R * 0.75f, c)
@@ -369,6 +387,7 @@ class TrackBuilder {
         mechs.add(Mech(M_CRADLE, x + fx * 0.55f, y, z + fz * 0.55f, yaw, 0.55f, 0.12f, hue))
         straight(1.1f, -0.04f)
         zones.add(Zone(s0 + 0.5f, approxS, Z_PAUSE, speed = 1.4f, pause = 0.55f))
+        mechs.last().s0 = s0 + 0.5f; mechs.last().s1 = approxS
         notes.add(Note(s0 + 0.6f, S_CLACK, 1f, 1f))
     }
 
@@ -379,6 +398,7 @@ class TrackBuilder {
         mechs.add(Mech(M_ROCKER, x + fx * 0.7f, y - 0.05f, z + fz * 0.7f, yaw, 0.7f, 0f, hue))
         straight(1.4f, -0.12f)
         zones.add(Zone(s0 + 0.4f, approxS - 0.3f, Z_PAUSE, speed = 1.0f, pause = 0.45f))
+        mechs.last().s0 = s0; mechs.last().s1 = approxS
         notes.add(Note(s0 + 0.55f, S_CLACK, 0.8f, 0.9f))
     }
 
@@ -386,10 +406,10 @@ class TrackBuilder {
     fun tippingBucket(hue: Float) {
         val s0 = approxS
         straight(0.35f, -0.3f)   // small drop into the bucket
-        val fx = sin(yaw); val fz = cos(yaw)
         mechs.add(Mech(M_BUCKET, x, y, z, yaw, 0.34f, 0.5f, hue))
         straight(0.75f, -0.35f)
         zones.add(Zone(s0 + 0.3f, s0 + 0.75f, Z_PAUSE, speed = 1.2f, pause = 0.8f))
+        mechs.last().s0 = s0 + 0.3f; mechs.last().s1 = s0 + 0.75f
         notes.add(Note(s0 + 0.35f, S_CLACK, 0.6f, 1f))
     }
 
@@ -418,12 +438,14 @@ class TrackBuilder {
         mechs.add(Mech(M_FERRIS, cx, cy, cz, yaw, r, 0f, hue))
         // centerline: half circle from top, down the forward side
         val n = 40
+        val sRide = approxS
         for (i in 1..n) {
             val t = i.toFloat() / n
             val th = t * PI.toFloat()
             emit(cx + fx * sin(th) * r, cy + cos(th) * r, cz + fz * sin(th) * r)
         }
-        zones.add(Zone(s0, approxS, Z_FERRIS, speed = 0.85f))
+        zones.add(Zone(sRide, approxS, Z_FERRIS, speed = 0.85f))
+        mechs.last().s0 = sRide; mechs.last().s1 = approxS
         notes.add(Note(s0 + 0.2f, S_RATCHET, 0.8f, 0.7f))
         straight(0.5f, -0.05f)
     }
@@ -465,15 +487,34 @@ class TrackBuilder {
         }
     }
 
-    /** Trommel: ball rolls through a big rotating wire drum. */
+    /** Trommel: the spinning drum TUMBLES the ball — the wall carries it up,
+     *  gravity drops it back, so it corkscrews through in surges and slips,
+     *  knocking against the cage as it goes. */
     fun trommel(hue: Float) {
         val s0 = approxS
         val len = 1.6f
         mechs.add(Mech(M_TROMMEL, x, y, z, yaw, len, 0.55f, hue))
-        straight(len, -0.16f)
-        zones.add(Zone(s0, approxS, Z_FERRIS, speed = 1.1f))
-        notes.add(Note(s0 + 0.4f, S_CLACK, 0.5f, 0.5f))
-        notes.add(Note(s0 + 1.1f, S_CLACK, 0.55f, 0.5f))
+        val fx = sin(yaw); val fz = cos(yaw)
+        val lx = cos(yaw); val lz = -sin(yaw)
+        val sx = x; val sy = y; val sz = z
+        val n = 28
+        for (i in 1..n) {
+            val t = i.toFloat() / n
+            val ph = t * 5.5f * PI.toFloat()
+            val wob = sin(ph) * 0.09f                 // carried up the wall...
+            val lift = (1f - cos(ph)) * 0.05f         // ...and dropped back
+            emit(sx + fx * len * t + lx * wob, sy - 0.16f * t + lift, sz + fz * len * t + lz * wob)
+        }
+        val sEnd = approxS
+        // surge with the wall, slip, surge again
+        zones.add(Zone(s0, s0 + (sEnd - s0) * 0.33f, Z_FERRIS, speed = 1.5f))
+        zones.add(Zone(s0 + (sEnd - s0) * 0.33f, s0 + (sEnd - s0) * 0.66f, Z_FERRIS, speed = 0.85f))
+        zones.add(Zone(s0 + (sEnd - s0) * 0.66f, sEnd, Z_FERRIS, speed = 1.45f))
+        var knock = 0.22f
+        while (knock < sEnd - s0) {
+            notes.add(Note(s0 + knock, S_CLACK, 0.5f + (knock % 0.2f), 0.55f))
+            knock += 0.34f
+        }
     }
 
     /** Decorative spinning propeller beside the track. */

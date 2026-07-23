@@ -238,13 +238,25 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         for (b in game.balls) drawBall(b)
     }
 
+    /** The ball currently riding this mechanism's stretch of track, if any. */
+    private fun ridingBall(mc: Mech): Ball? {
+        if (mc.s1 <= mc.s0) return null
+        return game.balls.firstOrNull { !it.dropping && it.s >= mc.s0 && it.s <= mc.s1 }
+    }
+
     private fun drawMech(mc: Mech, dt: Float) {
         val fxd = sin(mc.yaw); val fzd = cos(mc.yaw)
         val lxd = cos(mc.yaw); val lzd = -sin(mc.yaw)
         val c = TrackBuilder.hsv(mc.hue)
         when (mc.type) {
             M_FERRIS -> {
-                mc.phase += dt * 0.55f
+                // A riding ball is CARRIED: the wheel turns with it so a
+                // gondola stays underneath from the top all the way down.
+                val rider = ridingBall(mc)
+                if (rider != null) {
+                    val th = ((rider.s - mc.s0) / mc.a).coerceIn(0f, PI.toFloat())
+                    mc.phase += (th - mc.phase) * (1f - exp(-12f * dt))
+                } else mc.phase += dt * 0.55f
                 val r = mc.a
                 ringPlane(mc.x, mc.y, mc.z, fxd, fzd, r, 20, c[0], c[1], c[2], 0.75f)
                 ringPlane(mc.x, mc.y, mc.z, fxd, fzd, r * 0.12f, 8, c[0], c[1], c[2], 0.9f)
@@ -252,9 +264,15 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                     val a = mc.phase + k * PI.toFloat() / 4f
                     val px = mc.x + fxd * sin(a) * r; val py = mc.y + cos(a) * r; val pz = mc.z + fzd * sin(a) * r
                     dyn.line(mc.x, mc.y, mc.z, px, py, pz, c[0], c[1], c[2], 0.55f)
-                    // gondola
-                    dyn.line(px, py, pz, px, py - 0.14f, pz, 1f, 1f, 1f, 0.7f)
-                    dyn.line(px - lxd * 0.05f, py - 0.14f, pz - lzd * 0.05f, px + lxd * 0.05f, py - 0.14f, pz + lzd * 0.05f, 1f, 1f, 1f, 0.7f)
+                    // gondola basket — the container the ball rides in
+                    val gw = 0.16f; val gd = 0.15f
+                    val bx0 = px - fxd * gw; val bz0 = pz - fzd * gw
+                    val bx1 = px + fxd * gw; val bz1 = pz + fzd * gw
+                    dyn.line(px, py, pz, bx0, py - 0.06f, bz0, 1f, 1f, 1f, 0.6f)
+                    dyn.line(px, py, pz, bx1, py - 0.06f, bz1, 1f, 1f, 1f, 0.6f)
+                    dyn.line(bx0, py - 0.06f, bz0, bx0, py - gd, bz0, 1f, 1f, 1f, 0.7f)
+                    dyn.line(bx1, py - 0.06f, bz1, bx1, py - gd, bz1, 1f, 1f, 1f, 0.7f)
+                    dyn.line(bx0, py - gd, bz0, bx1, py - gd, bz1, 1f, 1f, 1f, 0.7f)
                 }
             }
             M_SCREW -> {
@@ -299,20 +317,32 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 fx.v(mc.x, mc.y, mc.z, 1f, 1f, 1f, 0.9f)
             }
             M_CRADLE -> {
-                mc.phase += dt * 3.4f
-                val sw = sin(mc.phase)
+                // Impact starts a REAL damped pendulum on the far ball:
+                // θ(t) = A·sin(ωt)·e^(-λt), ω = √(g/L) — it swings out, falls
+                // back, clacks, and rings down over a few diminishing arcs.
+                val rider = ridingBall(mc)
+                if (rider != null && game.time - mc.trigger > 2.0f) mc.trigger = game.time
                 val topY = mc.y + 0.55f
-                // the two end pendulums trade the swing, cabinet-of-motion style
-                val aSwing = if (sw > 0) sw * 0.7f else 0f
-                val bSwing = if (sw < 0) sw * 0.7f else 0f
+                val len = 0.42f
+                val omega = kotlin.math.sqrt(9.8f / len)
+                val t = if (mc.trigger >= 0f) game.time - mc.trigger else 99f
+                val swing = if (t < 6f) 0.85f * sin(omega * t).coerceAtLeast(0f) * exp(-0.55f * t) else 0f
+                val idle = 0.02f * sin(game.time * omega)   // faint residual sway
                 val ax = mc.x - fxd * mc.a * 0.5f; val az = mc.z - fzd * mc.a * 0.5f
                 val bx = mc.x + fxd * mc.a * 0.5f; val bz = mc.z + fzd * mc.a * 0.5f
-                pendulum(ax, topY, az, fxd, fzd, aSwing, c)
-                pendulum(bx, topY, bz, fxd, fzd, bSwing, c)
+                pendulum(ax, topY, az, fxd, fzd, idle, c)             // near ball rests
+                pendulum(bx, topY, bz, fxd, fzd, swing + idle, c)     // far ball flies
             }
             M_ROCKER -> {
-                mc.phase += dt * 1.1f
-                val tilt = sin(mc.phase) * 0.16f
+                // The beam TIPS UNDER THE BALL: level until the ball rolls on,
+                // then it leans progressively toward the exit side.
+                val rider = ridingBall(mc)
+                val target = if (rider != null) {
+                    val u = ((rider.s - mc.s0) / (mc.s1 - mc.s0)).coerceIn(0f, 1f)
+                    (u - 0.35f) * 0.42f
+                } else 0f
+                mc.phase += (target - mc.phase) * (1f - exp(-6f * dt))
+                val tilt = mc.phase
                 val hx = fxd * mc.a; val hz = fzd * mc.a
                 dyn.line(mc.x - hx, mc.y - sin(tilt) * mc.a, mc.z - hz,
                     mc.x + hx, mc.y + sin(tilt) * mc.a, mc.z + hz, c[0], c[1], c[2], 0.9f)
@@ -320,18 +350,31 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 dyn.line(mc.x + lxd * 0.08f, mc.y - 0.16f, mc.z + lzd * 0.08f, mc.x, mc.y, mc.z, 0.7f, 0.7f, 0.8f, 0.7f)
             }
             M_BUCKET -> {
-                mc.phase += dt * 0.9f
-                val tip = (sin(mc.phase) * 0.5f + 0.5f) * 0.55f
+                // The bucket CATCHES the ball: upright while the ball sits in
+                // it, then tips with the counterweight to pour it onward.
+                val rider = ridingBall(mc)
+                val target = if (rider != null && rider.pauseT > 0f) {
+                    val prog = 1f - (rider.pauseT / 0.8f).coerceIn(0f, 1f)
+                    if (prog < 0.4f) 0f else (prog - 0.4f) / 0.6f * 0.85f
+                } else if (rider != null) 0.85f else 0f
+                mc.phase += (target - mc.phase) * (1f - exp(-9f * dt))
+                val tip = mc.phase
                 val bx = mc.x; val by = mc.y; val bz = mc.z
-                // bucket square tipping about its lip
-                val s = mc.a
-                val e1x = fxd * s * cos(tip); val e1y = -s * sin(tip)
-                dyn.line(bx, by, bz, bx + e1x, by + e1y, bz + fzd * s * cos(tip), c[0], c[1], c[2], 0.9f)
-                dyn.line(bx, by - s * 0.7f, bz, bx + e1x, by + e1y - s * 0.7f, bz + fzd * s * cos(tip), c[0], c[1], c[2], 0.9f)
-                dyn.line(bx, by, bz, bx, by - s * 0.7f, bz, c[0], c[1], c[2], 0.9f)
-                // counterweight arm opposite
-                dyn.line(bx, by, bz, bx - fxd * mc.b, by + tip * 0.4f, bz - fzd * mc.b, 0.8f, 0.7f, 0.5f, 0.8f)
-                boxAt(bx - fxd * mc.b, by + tip * 0.4f, bz - fzd * mc.b, 0.09f, 0.9f, 0.75f, 0.4f, 0.9f)
+                // open bucket box, hinged at its forward lip, wrapping the ball
+                val s = mc.a; val d = s * 0.7f
+                val cT = cos(tip); val sT = sin(tip)
+                // back wall top/bottom, rotated about the lip at (bx,by)
+                val backTx = bx - fxd * s * cT; val backTy = by + s * sT
+                val backBx = bx - fxd * s * cT + fxd * 0f; val backBy = backTy - d * cT
+                dyn.line(bx, by, bz, backTx, backTy, bz - fzd * s * (1f - cT), c[0], c[1], c[2], 0.95f)
+                dyn.line(bx, by - d, bz, backTx, backBy, bz - fzd * s * (1f - cT), c[0], c[1], c[2], 0.95f)
+                dyn.line(bx, by, bz, bx, by - d, bz, c[0], c[1], c[2], 0.95f)
+                dyn.line(backTx, backTy, bz - fzd * s * (1f - cT), backTx, backBy, bz - fzd * s * (1f - cT), c[0], c[1], c[2], 0.95f)
+                // side rails of the bucket mouth
+                dyn.line(bx - lxd * s * 0.5f, by, bz - lzd * s * 0.5f, bx + lxd * s * 0.5f, by, bz + lzd * s * 0.5f, c[0], c[1], c[2], 0.6f)
+                // counterweight arm sinks as the bucket tips
+                dyn.line(bx, by, bz, bx - fxd * mc.b, by - tip * 0.3f, bz - fzd * mc.b, 0.8f, 0.7f, 0.5f, 0.8f)
+                boxAt(bx - fxd * mc.b, by - tip * 0.3f, bz - fzd * mc.b, 0.09f, 0.9f, 0.75f, 0.4f, 0.9f)
             }
             M_ELEV -> {
                 mc.phase = (mc.phase + dt * 0.75f) % 0.28f
@@ -380,10 +423,6 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         ring3(px, py, pz, lx, 0f, lz, u1x, u1y, u1z, r, col, 0.55f)
         ring3(px, py, pz, t1x, t1y, t1z, lx, 0f, lz, r, col, 0.55f)
         fx.v(px, py, pz, col[0], col[1], col[2], 1f)
-        // objective halo: still-clean player balls wear a white ring
-        if (!b.touched && b.dropTime >= 0f && !b.finished) {
-            ringXZ(px, py + r * 1.7f, pz, r * 0.55f, 8, 1f, 1f, 1f, 0.7f)
-        }
     }
 
     /** Circle in the plane spanned by unit vectors A and B around center. */
@@ -463,8 +502,8 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 text("TAPKUGELBAHN", 320f, 120f, 4.2f, 1f, 0.72f, 0.25f)
                 text("LEVEL ${game.level} · ${Machine.NAMES[game.level - 1]}", 320f, 175f, 1.9f, 0.6f, 0.85f, 1f)
                 text("TAP TO START", 320f, 260f, 2.4f, 1f, 1f, 1f, pulse)
-                text("TAP DROP BALL · SWIPE VIEW · DOUBLE-TAP NEXT", 320f, 320f, 1.35f, 0.6f, 0.7f, 0.8f, 0.9f)
-                text("TWO BALLS MUST RUN TOGETHER AND NEVER TOUCH", 320f, 348f, 1.35f, 0.6f, 0.7f, 0.8f, 0.9f)
+                text("TAP DROP BALLS · SWIPE VIEW", 320f, 320f, 1.35f, 0.6f, 0.7f, 0.8f, 0.9f)
+                text("DOUBLE-TAP FOR THE NEXT MACHINE WHEN A BALL COMES HOME", 320f, 348f, 1.35f, 0.6f, 0.7f, 0.8f, 0.9f)
             }
             GameState.RUN, GameState.COMPLETE, GameState.FINALE -> {
                 text("L${game.level} ${Machine.NAMES[game.level - 1]}", 14f, 40f, 1.6f, 0.65f, 0.85f, 1f, 1f, center = false)
@@ -472,8 +511,6 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 text(bc, 626f - StrokeFont.width(bc, 1.6f), 40f, 1.6f, 1f, 0.85f, 0.45f, 1f, center = false)
                 if (game.viewFlash > 0f)
                     text(Game.VIEW_NAMES[game.view], 320f, 78f, 2.2f, 0.65f, 1f, 0.8f, game.viewFlash.coerceAtMost(1f))
-                if (game.touchFlash > 0f)
-                    text("TOUCH!", 320f, 150f, 3.4f, 1f, 0.35f, 0.3f, game.touchFlash.coerceAtMost(1f))
                 when (game.state) {
                     GameState.COMPLETE -> {
                         text("LEVEL COMPLETE", 320f, 120f, 3.2f, 0.5f, 1f, 0.6f, 0.6f + 0.4f * pulse)
@@ -487,7 +524,6 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                     else -> {
                         val players = game.balls.count { it.dropTime >= 0f }
                         if (players == 0) text("TAP TO DROP A BALL", 320f, 440f, 1.7f, 1f, 1f, 1f, pulse)
-                        else if (players == 1) text("DROP A SECOND BALL WHILE IT RUNS", 320f, 440f, 1.6f, 0.7f, 1f, 0.75f, pulse)
                     }
                 }
             }
