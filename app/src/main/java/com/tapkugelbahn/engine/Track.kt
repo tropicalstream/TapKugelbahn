@@ -194,8 +194,11 @@ class TrackBuilder {
     /** Horizontal arc: turn by angle (radians, + = left), radius r, descending dy. */
     fun arc(r: Float, angle: Float, dy: Float, step: Float = 0.08f) {
         val n = (abs(angle) * r / step).toInt().coerceAtLeast(4)
-        val cxs = x - sin(yaw + if (angle > 0) PI.toFloat() / 2 else -PI.toFloat() / 2) * r
-        val czs = z - cos(yaw + if (angle > 0) PI.toFloat() / 2 else -PI.toFloat() / 2) * r
+        // Same centre-side correction as helix(); this one is currently unused
+        // by any machine, but it is the formula the others were copied from and
+        // would hand the same 2r break to the next mechanism written from it.
+        val cxs = x + sin(yaw + if (angle > 0) PI.toFloat() / 2 else -PI.toFloat() / 2) * r
+        val czs = z + cos(yaw + if (angle > 0) PI.toFloat() / 2 else -PI.toFloat() / 2) * r
         val sy = y
         val a0 = yaw + if (angle > 0) -PI.toFloat() / 2 else PI.toFloat() / 2
         for (i in 1..n) {
@@ -230,8 +233,17 @@ class TrackBuilder {
      *  The ball gathers speed lap over lap on the way down, as it should. */
     fun helix(r: Float, turns: Float, drop: Float, clockwise: Boolean = true) {
         val dir = if (clockwise) 1f else -1f
-        val cx = x - sin(yaw + dir * PI.toFloat() / 2) * r
-        val cz = z - cos(yaw + dir * PI.toFloat() / 2) * r
+        // The centre sits to the side the ball curves TOWARD. It was negated,
+        // which put it a diameter away on the wrong side: the corkscrew then
+        // began 2r (1.7 m at the sizes in use) from where the track left off,
+        // so the ball shot away in a straight line, spiralled off in mid-air
+        // and was dragged back by the next cylArc. The spiral looked present
+        // but never actually took hold of the ball.
+        // Note the start angle and the exit `yaw +=` below are BOTH correct
+        // for this centre — flipping a0 instead would close the gap and then
+        // send the ball around backwards.
+        val cx = x + sin(yaw + dir * PI.toFloat() / 2) * r
+        val cz = z + cos(yaw + dir * PI.toFloat() / 2) * r
         val a0 = yaw + dir * -PI.toFloat() / 2
         val sy = y
         val sHelix = approxS
@@ -453,8 +465,11 @@ class TrackBuilder {
     /** Interlocking double spiral: ride one helix; its twin interleaves in art. */
     fun doubleSpiral(hue: Float) {
         val r = 0.8f; val turns = 2.2f; val drop = 1.15f
-        val cx = x - sin(yaw + PI.toFloat() / 2) * r
-        val cz = z - cos(yaw + PI.toFloat() / 2) * r
+        // Same centre as helix() below computes for itself — these two MUST
+        // agree or the decorative twin floats a diameter away from the rail
+        // the ball actually rides.
+        val cx = x + sin(yaw + PI.toFloat() / 2) * r
+        val cz = z + cos(yaw + PI.toFloat() / 2) * r
         val a0 = yaw + -PI.toFloat() / 2
         val sy = y
         helix(r, turns, drop, clockwise = true)
