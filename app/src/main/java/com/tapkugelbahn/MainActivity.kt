@@ -55,6 +55,19 @@ class MainActivity : Activity(), GameHost {
 
         glView = object : GLSurfaceView(this) {}.apply {
             setEGLContextClientVersion(3)
+            // A 24-bit depth buffer, so solid geometry can occlude properly once
+            // the mechanisms stop being wireframe. MUST be requested before
+            // setRenderer — GLSurfaceView throws IllegalStateException
+            // otherwise — and without an explicit chooser the default config
+            // only carries 16 bits, which bands badly over the 0.06–60 m range
+            // this camera works across.
+            //
+            // Deliberately NO multisampling. On an additive waveguide the line
+            // brightness IS the image: MSAA splits a thin diagonal across 1–3
+            // of 4 samples and blends per-sample, so every neon line would come
+            // out dimmer for no gain in a renderer that draws almost no
+            // polygon edges.
+            setEGLConfigChooser(8, 8, 8, 8, 24, 0)
             preserveEGLContextOnPause = true
             setRenderer(renderer)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY

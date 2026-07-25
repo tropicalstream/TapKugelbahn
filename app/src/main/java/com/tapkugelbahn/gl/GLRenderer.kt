@@ -75,7 +75,14 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         uMVP = GLES30.glGetUniformLocation(program, "uMVP")
         uPointSize = GLES30.glGetUniformLocation(program, "uPointSize")
         uPoint = GLES30.glGetUniformLocation(program, "uPoint")
-        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        // Depth testing is on from here, but the glowing line-work never WRITES
+        // depth — it only tests. With nothing solid in the scene yet every line
+        // passes, so the picture is unchanged; when the shaded mechanisms
+        // arrive they will write depth in an earlier pass and the neon will
+        // correctly disappear behind them instead of summing through.
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDepthFunc(GLES30.GL_LEQUAL)
+        GLES30.glDepthMask(false)
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
         lastNanos = 0L
@@ -100,8 +107,17 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         buildDynamic(dt)
         buildHud()
 
+        // ONE clear for the whole surface, deliberately outside the per-eye
+        // loop below. glClear ignores glViewport — it honours only the scissor
+        // box, which this renderer never enables — so a clear issued per eye
+        // would wipe the entire framebuffer and the left eye would go black.
+        // The two eye viewports are disjoint rectangles, so neither can ever
+        // sample the other's depth and a per-eye depth clear is unnecessary.
+        // The mask has to be reopened first or the depth clear is masked out.
         GLES30.glViewport(0, 0, width, height)
-        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glDepthMask(true)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+        GLES30.glDepthMask(false)
         GLES30.glUseProgram(program)
 
         Matrix.setLookAtM(view, 0,
