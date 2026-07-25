@@ -590,7 +590,24 @@ class TrackBuilder {
         zones.add(Zone(sRide, approxS, Z_FERRIS, speed = 0.85f))
         mechs.last().s0 = sRide; mechs.last().s1 = approxS
         notes.add(Note(s0 + 0.2f, S_RATCHET, 0.8f, 0.7f))
-        straight(0.5f, -0.05f)
+
+        // The ride is half a circle, so it necessarily ends travelling BACKWARDS
+        // — at the bottom of a wheel you are moving opposite to the way you went
+        // in at the top. The old code then ran a straight along the ORIGINAL
+        // yaw, which put a true 180 degree cusp in the centreline: the sharpest
+        // corner on the level, and not something the arc smoothing can absorb,
+        // because the reversal is in the emitted points themselves.
+        //
+        // Tell the cursor the truth about which way the ball is going, then roll
+        // it out of the gondola through a half-circle run-out that brings it
+        // back to the travel direction. Physically this is the right story too:
+        // the wheel CARRIES the ball (its span is a Z_FERRIS zone), so the
+        // bottom of the ride is a delivery, and what follows is the ball rolling
+        // away from the gondola and curving off.
+        yaw += PI.toFloat()
+        yaw = ((yaw % (2f * PI.toFloat())) + 2f * PI.toFloat()) % (2f * PI.toFloat())
+        notes.add(Note(approxS + 0.05f, S_CLACK, 0.9f, 0.8f))   // set down
+        arc(0.42f, PI.toFloat(), -0.12f)
     }
 
     /** Interlocking double spiral: ride one helix; its twin interleaves in art. */
@@ -643,15 +660,29 @@ class TrackBuilder {
         val fx = sin(yaw); val fz = cos(yaw)
         val lx = cos(yaw); val lz = -sin(yaw)
         val sx = x; val sy = y; val sz = z
-        val n = 28
+        // The ball used to orbit the barrel 2.75 times while crossing it — about
+        // 10 rad/s — inside a drum the renderer turns at 1.5. It outran its own
+        // cage by nearly seven to one, and at 0.09 m of sway inside a 0.55 m
+        // barrel it never went near the wall it was supposedly carried by. Three
+        // quarters of a turn, wide enough to actually ride the wall, is both
+        // slow enough for the cage to keep up and far easier to read.
+        //
+        // The sin-squared envelope matters as much: the sway used to start at
+        // full rate, so the ball entered the drum 44 degrees off its axis. Tapered
+        // in and out, entry and exit deviation fall to about 6 degrees.
+        val n = 40
         for (i in 1..n) {
             val t = i.toFloat() / n
-            val ph = t * 5.5f * PI.toFloat()
-            val wob = sin(ph) * 0.09f                 // carried up the wall...
-            val lift = (1f - cos(ph)) * 0.05f         // ...and dropped back
+            val ph = t * 1.5f * PI.toFloat()
+            val env = sin(PI.toFloat() * t) * sin(PI.toFloat() * t)
+            val wob = sin(ph) * 0.30f * env           // carried up the wall...
+            val lift = (1f - cos(ph)) * 0.14f * env   // ...and dropped back
             emit(sx + fx * len * t + lx * wob, sy - 0.16f * t + lift, sz + fz * len * t + lz * wob)
         }
         val sEnd = approxS
+        // Without this the mech has s0 = s1 = -1, so ridingBall() returns null by
+        // construction and the drum could never lock to the ball inside it.
+        mechs.last().s0 = s0; mechs.last().s1 = sEnd
         // surge with the wall, slip, surge again
         zones.add(Zone(s0, s0 + (sEnd - s0) * 0.33f, Z_FERRIS, speed = 1.5f))
         zones.add(Zone(s0 + (sEnd - s0) * 0.33f, s0 + (sEnd - s0) * 0.66f, Z_FERRIS, speed = 0.85f))

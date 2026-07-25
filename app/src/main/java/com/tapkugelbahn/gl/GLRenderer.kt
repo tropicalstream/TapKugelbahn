@@ -396,7 +396,16 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 }
             }
             M_TROMMEL -> {
-                mc.phase += dt * 1.5f
+                // Lock the cage to whatever is inside it. The ball's sway across
+                // the barrel is three quarters of a turn, so matching that keeps
+                // a bar under the ball the whole way through instead of letting
+                // it cut across a drum turning at some unrelated rate. Idles at
+                // its old speed when empty, so the machine still looks alive.
+                val rider = ridingBall(mc)
+                if (rider != null) {
+                    val u = ((rider.s - mc.s0) / (mc.s1 - mc.s0)).coerceIn(0f, 1f)
+                    mc.phase = u * 1.5f * PI.toFloat()
+                } else mc.phase += dt * 1.5f
                 val len = mc.a; val r = mc.b
                 for (k in 0 until 8) {
                     val a = mc.phase + k * PI.toFloat() / 4f
