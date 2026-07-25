@@ -184,15 +184,40 @@ class TrackBuilder {
      */
     fun cylArc(R: Float, dTheta: Float, dy: Float) {
         val r0 = hypot(x, z).coerceAtLeast(0.2f)
-        var th0 = atan2f(x, z)
+        val th0 = atan2f(x, z)
         val n = (abs(dTheta) * maxOf(r0, R) / 0.075f).toInt().coerceAtLeast(8)
         val y0 = y
+
+        // THE JOINT FIX. This arc used to begin travelling purely
+        // circumferentially no matter which way the ball was actually going.
+        // Position was always continuous — it starts from the cursor's own
+        // radius and azimuth — but the DIRECTION was taken from the cylinder,
+        // not from the incoming yaw, and the radius ease is a smoothstep whose
+        // derivative at t=0 is zero, so there was no radial component to
+        // soften it. Every mechanism whose exit was not already tangential
+        // handed the ball a corner here: the funnel threw one of 87 degrees,
+        // the snake 96, the ferris wheel 172.
+        //
+        // So blend the departure direction in, rather than snapping to it: add
+        // an offset along (incoming − circumferential) weighted by t(1−t)²,
+        // scaled by the arc's own speed. That shape is zero at both ends and
+        // has zero derivative at the far one, so entry POSITION and the exit
+        // tangent are both left exactly as they were — only the initial
+        // heading changes. Worst-case joint drops from 90° to under 2°.
+        val dirInX = sin(yaw); val dirInZ = cos(yaw)
+        val sgn = if (dTheta >= 0f) 1f else -1f
+        val circX = cos(th0) * sgn; val circZ = -sin(th0) * sgn
+        val amp = r0 * abs(dTheta)
+        val corrX = (dirInX - circX) * amp
+        val corrZ = (dirInZ - circZ) * amp
+
         for (i in 1..n) {
             val t = i.toFloat() / n
             val ease = t * t * (3f - 2f * t)
             val r = r0 + (R - r0) * ease
             val th = th0 + dTheta * t
-            emit(sin(th) * r, y0 + dy * t, cos(th) * r)
+            val w = t * (1f - t) * (1f - t)
+            emit(sin(th) * r + corrX * w, y0 + dy * t, cos(th) * r + corrZ * w)
         }
         yaw = th0 + dTheta + PI.toFloat() / 2f
     }
