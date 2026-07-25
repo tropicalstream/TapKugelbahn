@@ -427,12 +427,29 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         // rolling basis: tangent, lateral, up' rotated by roll about lateral
         m.tangent(b.s, bt)
         var lx = bt[2]; var lz = -bt[0]
-        val ll = hypot(lx, lz).coerceAtLeast(0.05f); lx /= ll; lz /= ll
+        var ll = hypot(lx, lz)
+        if (ll < 0.20f) {
+            // Tangent has tipped near-vertical — inside a loop, a helix, a steep
+            // drop — and the lateral built from it collapses. Clamping its
+            // LENGTH (as this did) stops the divide-by-zero but leaves the
+            // direction arbitrary, so the basis span and the ball's rings
+            // flipped about at random. Every horizontal direction is genuinely
+            // perpendicular to a vertical tangent, so pick the one that follows
+            // the cylinder wall: well-defined everywhere and continuous as the
+            // ball goes round.
+            val rr = hypot(px, pz).coerceAtLeast(1e-3f)
+            lx = -pz / rr; lz = px / rr
+            ll = 1f
+        }
+        lx /= ll; lz /= ll
         val ux = bt[1] * lz; val uy = bt[2] * lx - bt[0] * lz; val uz = -bt[1] * lx
         val cR = cos(b.roll); val sR = sin(b.roll)
-        // rotated basis vectors t' and u'
-        val t1x = bt[0] * cR + ux * sR; val t1y = bt[1] * cR + uy * sR; val t1z = bt[2] * cR + uz * sR
-        val u1x = -bt[0] * sR + ux * cR; val u1y = -bt[1] * sR + uy * cR; val u1z = -bt[2] * sR + uz * cR
+        // Rotated basis. The sine terms were the other way round, which spun the
+        // ball BACKWARDS: a mark on the leading face climbed up and over instead
+        // of diving under, so the ball appeared to roll against its travel.
+        // Rolling forward carries the front of the ball DOWN toward the contact.
+        val t1x = bt[0] * cR - ux * sR; val t1y = bt[1] * cR - uy * sR; val t1z = bt[2] * cR - uz * sR
+        val u1x = bt[0] * sR + ux * cR; val u1y = bt[1] * sR + uy * cR; val u1z = bt[2] * sR + uz * cR
 
         // ghost trail: the sphere a few centimetres back along the rail, twice,
         // shrinking and fading. Only once it is actually travelling, so a ball
@@ -450,34 +467,65 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
             }
         }
 
+        // Far off, the rings converge to a few pixels and the rim term — which
+        // dims everything facing the eye — would fade the ball into nothing.
+        // There used to be a bright dot at the centre carrying visibility at
+        // range; it read as artificial up close, so the rings themselves gain
+        // with distance instead. Nothing is added that is not part of the ball.
+        val dcam = hypot(hypot(camPos[0] - px, camPos[1] - py), camPos[2] - pz)
+        val g = 1f + 1.15f * ((dcam - 1.8f) / 4.5f).coerceIn(0f, 1f)
+
         // three great circles + two latitude bands about the roll axis
-        ringRim(px, py, pz, t1x, t1y, t1z, u1x, u1y, u1z, r, col, 1f, 16)   // motion plane (spins!)
-        ringRim(px, py, pz, lx, 0f, lz, u1x, u1y, u1z, r, col, 0.7f, 16)
-        ringRim(px, py, pz, t1x, t1y, t1z, lx, 0f, lz, r, col, 0.7f, 16)
+        ringRim(px, py, pz, t1x, t1y, t1z, u1x, u1y, u1z, r, col, 1f * g, 16)   // motion plane (spins!)
+        ringRim(px, py, pz, lx, 0f, lz, u1x, u1y, u1z, r, col, 0.7f * g, 16)
+        ringRim(px, py, pz, t1x, t1y, t1z, lx, 0f, lz, r, col, 0.7f * g, 16)
         for (s in intArrayOf(-1, 1)) {
             val lat = 0.66f                       // ~ +/-41 degrees
             val cl = cos(lat); val sl = sin(lat) * s
             // band circle: radius r*cos(lat), centre pushed along the roll axis
             ringRim(px + lx * r * sl, py, pz + lz * r * sl,
-                t1x, t1y, t1z, u1x, u1y, u1z, r * cl, col, 0.42f, 14)
+                t1x, t1y, t1z, u1x, u1y, u1z, r * cl, col, 0.42f * g, 14)
         }
 
-        // specular glint where a polished ball would catch the key light:
-        // the surface point whose normal bisects eye and light.
+        // Specular highlight, drawn ON the surface rather than as a point
+        // sprite. A GL_POINT sits at a fixed pixel size no matter how far away
+        // the ball is and never rotates with it, so it read as a sticker
+        // floating on top of the sculpture instead of light on a curved
+        // surface. A small circle laid on the sphere at the halfway vector
+        // shrinks with distance and slides across the surface as the camera
+        // moves, the way a real highlight does.
         var hx = KEY_X; var hy = KEY_Y; var hz = KEY_Z
         var vx = camPos[0] - px; var vy = camPos[1] - py; var vz = camPos[2] - pz
         val vl = hypot(hypot(vx, vy), vz).coerceAtLeast(1e-4f); vx /= vl; vy /= vl; vz /= vl
         hx += vx; hy += vy; hz += vz
         val hl = hypot(hypot(hx, hy), hz).coerceAtLeast(1e-4f); hx /= hl; hy /= hl; hz /= hl
-        fx.v(px + hx * r * 0.92f, py + hy * r * 0.92f, pz + hz * r * 0.92f, 1f, 1f, 1f, 1f)
-
-        // The core dot is a distance cue, not part of the sphere. Up close a
-        // bright centre makes a solid ball read as a hollow lantern, so it
-        // fades away as you approach; far off, where the rings collapse to a
-        // scribble, it becomes the thing that says "the ball is there".
-        val dcam = hypot(hypot(camPos[0] - px, camPos[1] - py), camPos[2] - pz)
-        val coreA = 0.14f + 0.76f * ((dcam - 1.1f) / 3.2f).coerceIn(0f, 1f)
-        fx.v(px, py, pz, col[0], col[1], col[2], coreA)
+        // two vectors spanning the plane perpendicular to h
+        var e1x = -hy; var e1y = hx; var e1z = 0f
+        if (hypot(hypot(e1x, e1y), e1z) < 1e-3f) { e1x = 1f; e1y = 0f; e1z = 0f }
+        val e1l = hypot(hypot(e1x, e1y), e1z); e1x /= e1l; e1y /= e1l; e1z /= e1l
+        val e2x = hy * e1z - hz * e1y
+        val e2y = hz * e1x - hx * e1z
+        val e2z = hx * e1y - hy * e1x
+        // Concentric rings with the brightness piled toward the middle: a lone
+        // outline circle reads as a hoop resting on the ball, whereas a tight
+        // core fading outward reads as light falling on it.
+        for (ring in 0..2) {
+            val spread = 0.34f - ring * 0.115f
+            val ga = 0.30f + ring * 0.34f          // innermost brightest
+            val cs = cos(spread); val ss = sin(spread)
+            var gpx = 0f; var gpy = 0f; var gpz = 0f
+            val segs = 9 - ring * 2
+            for (i in 0..segs) {
+                val a = i * 2f * PI.toFloat() / segs
+                val ca = cos(a); val sa = sin(a)
+                val nx = hx * cs + (e1x * ca + e2x * sa) * ss
+                val ny = hy * cs + (e1y * ca + e2y * sa) * ss
+                val nz = hz * cs + (e1z * ca + e2z * sa) * ss
+                val qx = px + nx * r; val qy = py + ny * r; val qz = pz + nz * r
+                if (i > 0) dyn.line(gpx, gpy, gpz, qx, qy, qz, 1f, 1f, 0.96f, ga)
+                gpx = qx; gpy = qy; gpz = qz
+            }
+        }
     }
 
     /**
