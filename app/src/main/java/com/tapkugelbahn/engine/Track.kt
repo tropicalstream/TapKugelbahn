@@ -347,18 +347,70 @@ class TrackBuilder {
 
     // ------------------------------------------------------- mechanisms
 
-    /** Drop intake: a catch funnel; the loop's s=0 should be here. */
+    /**
+     * The drain. The ball is dropped onto the rim and orbits the bowl three
+     * and a half times, tightening and quickening, before it goes down the
+     * throat — the coin-funnel whirl every Kugelbahn opens with.
+     *
+     * This used to be cone rings drawn as decoration with a plain straight
+     * run through them: the ball landed and set off in a line, so the funnel
+     * was scenery the ball ignored. The spiral is now the actual centreline,
+     * so the orbit is where the ball really goes.
+     *
+     * The loop's s = 0 is the rim, which is both where a dropped ball lands
+     * and where the elevator returns one, so every lap starts with the whirl.
+     */
     fun intakeFunnel(hue: Float) {
-        // rings of the catch cone above the current point
-        val c = accent(hue, 0.75f)
-        ringY(x, y + 0.30f, z, 0.55f, 14, c)
-        ringY(x, y + 0.16f, z, 0.34f, 12, c)
-        ringY(x, y + 0.05f, z, 0.18f, 10, c)
-        for (k in 0 until 6) {
-            val a = k * PI.toFloat() / 3
-            line(x + sin(a) * 0.55f, y + 0.30f, z + cos(a) * 0.55f, x + sin(a) * 0.18f, y + 0.05f, z + cos(a) * 0.18f, c)
+        val sIn = approxS
+        val rimR = 0.62f
+        val throat = 0.11f
+        val turns = 3.5f
+        val drop = 0.62f
+        // Centre to the SIDE, so the ball enters travelling along the rim
+        // instead of being thrown at the middle — the same lesson the gravity
+        // funnel needed.
+        val cx0 = x + sin(yaw + PI.toFloat() / 2) * rimR
+        val cz0 = z + cos(yaw + PI.toFloat() / 2) * rimR
+        val topY = y
+        val a0 = yaw - PI.toFloat() / 2
+        val n = (turns * 44).toInt()
+        for (i in 1..n) {
+            val t = i.toFloat() / n
+            // radius falls away slowly at first, then dives: a real bowl holds
+            // the ball out wide for the early laps and swallows it at the end
+            val r = rimR + (throat - rimR) * (t * t)
+            val a = a0 + turns * 2f * PI.toFloat() * t
+            emit(cx0 + sin(a) * r, topY - drop * t * t, cz0 + cos(a) * r)
         }
-        straight(0.9f, -0.18f)
+        val spiralLen = approxS - sIn
+        // Quickening, lap over lap — angular momentum as the orbit tightens.
+        for (k in 0 until 5) {
+            zones.add(Zone(sIn + spiralLen * k / 5f, sIn + spiralLen * (k + 1) / 5f,
+                Z_FERRIS, speed = 1.15f + k * 0.42f))
+        }
+        // a rising tick per half-lap, so you can hear it winding in
+        val ticks = (turns * 2).toInt()
+        for (k in 1..ticks) {
+            notes.add(Note(sIn + spiralLen * k / ticks, S_RATCHET,
+                0.7f + 0.6f * k / ticks, 0.4f))
+        }
+
+        // the bowl itself, drawn around the path the ball actually takes
+        val c = accent(hue, 0.7f)
+        val dim = accent(hue, 0.3f)
+        for (ring in 0..4) {
+            val t = ring / 4f
+            ringY(cx0, topY - drop * t * t + 0.02f, cz0, rimR + (throat - rimR) * (t * t), 16, c)
+        }
+        for (k in 0 until 8) {
+            val a = k * PI.toFloat() / 4
+            line(cx0 + sin(a) * rimR, topY + 0.02f, cz0 + cos(a) * rimR,
+                cx0 + sin(a) * throat, topY - drop, cz0 + cos(a) * throat, dim)
+        }
+        // down the throat and away
+        yaw = atan2f(x - cx0, z - cz0) + PI.toFloat() / 2
+        straight(0.45f, -0.42f)
+        notes.add(Note(approxS, S_CLACK, 0.75f, 0.8f))
     }
 
     /** Gravity funnel: ball spirals a shrinking cone into the center hole. */
