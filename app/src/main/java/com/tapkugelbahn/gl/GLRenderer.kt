@@ -511,13 +511,36 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     }
 
     private fun pendulum(px: Float, topY: Float, pz: Float, fxd: Float, fzd: Float, swing: Float, c: FloatArray) {
-        val len = topY - (topY - 0.42f)
         val ex = px + fxd * sin(swing) * 0.42f
         val ey = topY - cos(swing) * 0.42f
         val ez = pz + fzd * sin(swing) * 0.42f
-        dyn.line(px, topY, pz, ex, ey, ez, 0.8f, 0.85f, 0.95f, 0.85f)
-        // little wireframe ball
-        ringXZ(ex, ey, ez, BALL_R * 0.7f, 8, c[0], c[1], c[2], 0.9f)
+        // Bifilar suspension, like the real thing — a cradle bob hangs off two
+        // splayed wires, which is what keeps it swinging in one plane.
+        val sx = fzd * 0.05f; val sz = -fxd * 0.05f
+        dyn.line(px + sx, topY, pz + sz, ex, ey, ez, 0.8f, 0.85f, 0.95f, 0.8f)
+        dyn.line(px - sx, topY, pz - sz, ex, ey, ez, 0.8f, 0.85f, 0.95f, 0.8f)
+        // The bob was a single ring in the HORIZONTAL plane, which is edge-on
+        // from almost every camera in this game and collapsed to a line — the
+        // end pendulums were swinging all along, invisibly. Three orthogonal
+        // rings read as a sphere from any angle.
+        val r = BALL_R * 0.72f
+        ringXZ(ex, ey, ez, r, 10, c[0], c[1], c[2], 0.9f)
+        ringVert(ex, ey, ez, r, 10, 1f, 0f, c[0], c[1], c[2], 0.9f)
+        ringVert(ex, ey, ez, r, 10, 0f, 1f, c[0], c[1], c[2], 0.9f)
+    }
+
+    /** Circle in a vertical plane whose horizontal direction is (dx,dz). */
+    private fun ringVert(cx: Float, cy: Float, cz: Float, r: Float, segs: Int,
+                         dx: Float, dz: Float, cr: Float, cg: Float, cb: Float, a: Float) {
+        var pxp = cx + dx * r; var pyp = cy; var pzp = cz + dz * r
+        for (i in 1..segs) {
+            val ang = i * 2f * PI.toFloat() / segs
+            val qx = cx + dx * cos(ang) * r
+            val qy = cy + sin(ang) * r
+            val qz = cz + dz * cos(ang) * r
+            dyn.line(pxp, pyp, pzp, qx, qy, qz, cr, cg, cb, a)
+            pxp = qx; pyp = qy; pzp = qz
+        }
     }
 
     /**

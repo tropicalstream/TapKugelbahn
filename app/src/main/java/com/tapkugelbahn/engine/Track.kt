@@ -279,7 +279,7 @@ class TrackBuilder {
 
     /** Helix (corkscrew / spiral): turns full rotations, total drop, radius r.
      *  The ball gathers speed lap over lap on the way down, as it should. */
-    fun helix(r: Float, turns: Float, drop: Float, clockwise: Boolean = true) {
+    fun helix(r: Float, turns: Float, drop: Float, clockwise: Boolean = true, hue: Float = 0.55f) {
         val dir = if (clockwise) 1f else -1f
         // The centre sits to the side the ball curves TOWARD. It was negated,
         // which put it a diameter away on the wrong side: the corkscrew then
@@ -304,9 +304,44 @@ class TrackBuilder {
         yaw += dir * turns * 2f * PI.toFloat()
         yaw = ((yaw % (2f * PI.toFloat())) + 2f * PI.toFloat()) % (2f * PI.toFloat())
         val helixLen = approxS - sHelix
+
+        // This mechanism used to emit NO sculpture whatsoever — not one line.
+        // All you saw was the auto-generated rail and tunnel hoops happening to
+        // spiral, so there was nothing to read as a corkscrew; it looked like
+        // track that wandered. Give it its spindle and the spokes hanging the
+        // coil off it, which is what makes a helix legible as a machine.
+        val col = accent(hue, 0.55f)
+        val dim = accent(hue, 0.22f)
+        val yTop = sy; val yBot = sy - drop
+        line(cx, yTop + 0.1f, cz, cx, yBot - 0.1f, cz, col)          // the spindle
+        val spokes = (turns * 8).toInt().coerceAtLeast(8)
+        for (k in 0..spokes) {
+            val t = k.toFloat() / spokes
+            val a = a0 + dir * turns * 2f * PI.toFloat() * t
+            val hy = sy - drop * t
+            val hx = cx + sin(a) * r; val hz = cz + cos(a) * r
+            line(cx, hy, cz, hx, hy, hz, if (k % 2 == 0) col else dim)
+            // a short flight of the thread, so the coil has a surface
+            if (k < spokes) {
+                val a2 = a0 + dir * turns * 2f * PI.toFloat() * ((k + 0.5f) / spokes)
+                val y2 = sy - drop * ((k + 0.5f) / spokes)
+                line(hx, hy, hz, cx + sin(a2) * r * 0.55f, y2, cz + cos(a2) * r * 0.55f, dim)
+            }
+        }
+
+        // Speed ladder. These zones PIN the speed outright (Z_FERRIS assigns
+        // v = z.speed every step), so the old 1.35 start actively braked a ball
+        // that arrived faster and the corkscrew read as inert. Start from what
+        // a ball plausibly carries in and genuinely gather pace down the coil.
         for (k in 0 until 4) {
             zones.add(Zone(sHelix + helixLen * k / 4f, sHelix + helixLen * (k + 1) / 4f,
-                Z_FERRIS, speed = 1.35f + k * 0.5f))
+                Z_FERRIS, speed = 1.9f + k * 0.75f))
+        }
+        // a rung note per quarter turn — the coil should tick as it winds down
+        val ticks = (turns * 4).toInt().coerceAtLeast(4)
+        for (k in 1..ticks) {
+            notes.add(Note(sHelix + helixLen * k / ticks, S_RATCHET,
+                0.85f + 0.35f * k / ticks, 0.5f))
         }
     }
 
@@ -460,7 +495,14 @@ class TrackBuilder {
         straight(1.1f, -0.04f)
         zones.add(Zone(s0 + 0.5f, approxS, Z_PAUSE, speed = 1.4f, pause = 0.55f))
         mechs.last().s0 = s0 + 0.5f; mechs.last().s1 = approxS
+        // A cradle makes TWO sounds, and only the first was here: the strike as
+        // the row takes the impact, then the far bob swinging back into the
+        // stack about half a period later. One clack alone is why the whole
+        // mechanism read as silent scenery. Pendulum length 0.42 m gives
+        // T = 2*pi*sqrt(L/g) = 1.30 s, so the return lands ~0.65 s after
+        // release; at the 1.4 m/s eject speed that is ~0.9 m further along.
         notes.add(Note(s0 + 0.6f, S_CLACK, 1f, 1f))
+        notes.add(Note(s0 + 1.45f, S_CLACK, 0.9f, 0.75f))
     }
 
     /** Rocker arm / seesaw. */
