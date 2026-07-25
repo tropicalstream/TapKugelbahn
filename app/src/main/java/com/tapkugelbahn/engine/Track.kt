@@ -40,6 +40,23 @@ const val M_ELEV = 7
 const val S_ROLL = 0; const val S_CLACK = 1; const val S_XYLO = 2
 const val S_RATCHET = 3; const val S_DING = 4; const val S_DROP = 5
 
+// Solid-mesh materials (index into the renderer's material table)
+const val MAT_STEEL = 0
+const val MAT_WOOD = 1
+const val MAT_BRASS = 2
+
+/**
+ * A span of solid geometry, bucketed by arc length so the renderer can issue
+ * only what is near the eye. Everything beyond stays neon line-work, which is
+ * both the performance budget and the art direction: solid where you can see
+ * the craft, glowing where it is just structure across the room.
+ */
+data class MeshChunk(
+    val s0: Float, val s1: Float,
+    val start: Int, val count: Int,      // vertex range in the mesh array
+    val cx: Float, val cy: Float, val cz: Float, val rad: Float
+)
+
 data class Zone(val s0: Float, val s1: Float, val type: Int, val speed: Float = 0f, val pause: Float = 0f)
 data class Note(val s: Float, val sound: Int, val pitch: Float, val vol: Float = 1f)
 
@@ -62,6 +79,8 @@ class MachineModel(
     val length: Float,
     val staticLines: FloatArray, // line verts ×7 (xyz rgba)
     val staticCount: Int,
+    val meshVerts: FloatArray,   // solid verts ×7 (xyz  nx ny nz  matId)
+    val meshChunks: List<MeshChunk>,
     val mechs: List<Mech>,
     val zones: List<Zone>,
     val notes: List<Note>,
@@ -110,6 +129,10 @@ class MachineModel(
  * each mechanism appends samples and art, then leaves the cursor at its exit.
  */
 class TrackBuilder {
+
+    // Solid geometry, emitted in the same pass as the glowing line-work.
+    val mesh = ArrayList<Float>()          // xyz  nx ny nz  matId
+    val chunks = ArrayList<MeshChunk>()
     private val pts = ArrayList<Float>(20000)
     private val art = ArrayList<Float>(120000)
     val mechs = ArrayList<Mech>()
@@ -582,6 +605,44 @@ class TrackBuilder {
 
     // ------------------------------------------------------- art helpers
 
+    // ---------------------------------------------------- solid mesh helpers
+
+    /** One ring of TUBE_SIDES points around a rail centre, into `out` as xyz+nrm. */
+    private fun railRing(cx: Float, cy: Float, cz: Float,
+                         ax: Float, ay: Float, az: Float,
+                         bx: Float, by: Float, bz: Float, out: FloatArray) {
+        for (k in 0 until TUBE_SIDES) {
+            val a = k * 2f * PI.toFloat() / TUBE_SIDES
+            val ca = cos(a); val sa = sin(a)
+            val nx = ax * ca + bx * sa
+            val ny = ay * ca + by * sa
+            val nz = az * ca + bz * sa
+            val o = k * 6
+            out[o] = cx + nx * TUBE_R; out[o + 1] = cy + ny * TUBE_R; out[o + 2] = cz + nz * TUBE_R
+            out[o + 3] = nx; out[o + 4] = ny; out[o + 5] = nz
+        }
+    }
+
+    /** Bridge two rings with a band of quads (two triangles each). */
+    private fun tubeSpan(p: FloatArray, q: FloatArray, mat: Int) {
+        for (k in 0 until TUBE_SIDES) {
+            val k2 = (k + 1) % TUBE_SIDES
+            val a = k * 6; val b = k2 * 6
+            tri(p, a, q, a, q, b, mat)
+            tri(p, a, q, b, p, b, mat)
+        }
+    }
+
+    private fun tri(r0: FloatArray, o0: Int, r1: FloatArray, o1: Int, r2: FloatArray, o2: Int, mat: Int) {
+        push(r0, o0, mat); push(r1, o1, mat); push(r2, o2, mat)
+    }
+
+    private fun push(r: FloatArray, o: Int, mat: Int) {
+        mesh.add(r[o]); mesh.add(r[o + 1]); mesh.add(r[o + 2])
+        mesh.add(r[o + 3]); mesh.add(r[o + 4]); mesh.add(r[o + 5])
+        mesh.add(mat.toFloat())
+    }
+
     private fun ringY(cx: Float, cy: Float, cz: Float, r: Float, segs: Int, c: FloatArray) {
         var pa = 0f
         for (i in 1..segs) {
@@ -625,6 +686,31 @@ class TrackBuilder {
             acc += kotlin.math.sqrt(dx * dx + dy * dy + dz * dz)
             cum[i] = acc
         }
+        // solid-mesh scratch: two 6-sided rail rings, swept into tubes
+        val ringA = FloatArray(TUBE_SIDES * 6); val prevA = FloatArray(TUBE_SIDES * 6)
+        val ringB = FloatArray(TUBE_SIDES * 6); val prevB = FloatArray(TUBE_SIDES * 6)
+        var haveRing = false
+        var chunkS0 = 0f
+        var chunkVert0 = 0
+        fun closeChunk(sEnd: Float) {
+            val vEnd = mesh.size / 7
+            if (vEnd <= chunkVert0) return
+            // bounding sphere of the chunk, for the distance test
+            var mnx = Float.MAX_VALUE; var mny = Float.MAX_VALUE; var mnz = Float.MAX_VALUE
+            var mxx = -Float.MAX_VALUE; var mxy = -Float.MAX_VALUE; var mxz = -Float.MAX_VALUE
+            for (v in chunkVert0 until vEnd) {
+                val o = v * 7
+                mnx = minOf(mnx, mesh[o]); mxx = maxOf(mxx, mesh[o])
+                mny = minOf(mny, mesh[o + 1]); mxy = maxOf(mxy, mesh[o + 1])
+                mnz = minOf(mnz, mesh[o + 2]); mxz = maxOf(mxz, mesh[o + 2])
+            }
+            val ccx = (mnx + mxx) * 0.5f; val ccy = (mny + mxy) * 0.5f; val ccz = (mnz + mxz) * 0.5f
+            val rad = kotlin.math.sqrt(
+                (mxx - ccx) * (mxx - ccx) + (mxy - ccy) * (mxy - ccy) + (mxz - ccz) * (mxz - ccz))
+            chunks.add(MeshChunk(chunkS0, sEnd, chunkVert0, vEnd - chunkVert0, ccx, ccy, ccz, rad))
+            chunkVert0 = vEnd
+        }
+
         // rails: twin lines offset laterally, slightly below center; hoops every 0.55m
         val rail = steel(0.55f)
         val railGlow = steel(0.28f)
@@ -653,6 +739,32 @@ class TrackBuilder {
                 line(pr2[0], pr2[1], pr2[2], r2[0], r2[1], r2[2], rail)
                 // sleepers occasionally
                 if (i % 9 == 0) line(r1[0], r1[1], r1[2], r2[0], r2[1], r2[2], railGlow)
+            }
+
+            // Solid twin rails, swept as hex tubes. Emitted from the SAME
+            // centres as the lines above, so wherever a tube is drawn it sits
+            // exactly over its own neon line and hides it by depth — the swap
+            // from glowing to solid needs no per-line bookkeeping at all.
+            // Every RING_STRIDE samples keeps the triangle count sane; the
+            // centreline is denser than a rail needs to be.
+            if (i % RING_STRIDE == 0) {
+                // binormal: perpendicular to both tangent and lateral
+                val bnx = ty * lz - tz * 0f
+                val bny = tz * lx - tx * lz
+                val bnz = 0f * tx - ty * lx
+                val bl = kotlin.math.sqrt(bnx * bnx + bny * bny + bnz * bnz).coerceAtLeast(1e-4f)
+                val ex = bnx / bl; val ey = bny / bl; val ez = bnz / bl
+                railRing(r1[0], r1[1], r1[2], lx, 0f, lz, ex, ey, ez, ringA)
+                railRing(r2[0], r2[1], r2[2], lx, 0f, lz, ex, ey, ez, ringB)
+                if (haveRing) {
+                    tubeSpan(prevA, ringA, MAT_STEEL)
+                    tubeSpan(prevB, ringB, MAT_STEEL)
+                }
+                System.arraycopy(ringA, 0, prevA, 0, ringA.size)
+                System.arraycopy(ringB, 0, prevB, 0, ringB.size)
+                haveRing = true
+                // close a chunk every CHUNK_M metres of track
+                if (cum[i] - chunkS0 >= CHUNK_M) { closeChunk(cum[i]); chunkS0 = cum[i] }
             }
             pr1 = r1; pr2 = r2
             // tunnel hoops — the full wired tunnel
@@ -690,14 +802,24 @@ class TrackBuilder {
         }
         val ctr = floatArrayOf((mnx + mxx) / 2, (mny + mxy) / 2, (mnz + mxz) / 2)
         val rad = maxOf(mxx - mnx, mxy - mny, mxz - mnz) * 0.62f + 1.2f
+        closeChunk(acc)          // whatever is left after the last CHUNK_M boundary
         return MachineModel(
             pts.toFloatArray(), cum, acc, art.toFloatArray(), art.size / 7,
+            mesh.toFloatArray(), chunks,
             mechs, zones.sortedBy { it.s0 }, notes.sortedBy { it.s },
             finishS, intakePos, ctr, rad
         )
     }
 
     companion object {
+        // Solid rail tubes: 6 sides is enough at this scale, and a ring every
+        // other centreline sample (~0.18 m) still curves cleanly through a
+        // loop while keeping the triangle count in budget.
+        const val TUBE_SIDES = 6
+        const val TUBE_R = 0.026f
+        const val RING_STRIDE = 2
+        const val CHUNK_M = 4f          // metres of track per drawable chunk
+
         fun hsv(h: Float): FloatArray {
             val h6 = ((h % 1f + 1f) % 1f) * 6f
             val i = h6.toInt(); val f = h6 - i

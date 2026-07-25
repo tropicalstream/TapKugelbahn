@@ -55,6 +55,14 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     private var staticCount = 0
     private var uploadedRevision = -1
 
+    // solid mesh
+    private var meshProgram = 0
+    private var mPos = 0; private var mNrm = 0; private var mMat = 0
+    private var mMVP = 0; private var mEye = 0
+    private var meshVbo = 0
+    private var meshUploaded = -1
+    private var meshTrisDrawn = 0
+
     // camera state (smoothed)
     private val camPos = floatArrayOf(0f, 3f, -7f)
     private val camLook = floatArrayOf(0f, 2f, 0f)
@@ -66,10 +74,17 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     private val bp = FloatArray(3)
     private val bt = FloatArray(3)
     private val ballScratch = FloatArray(3)
+    private val chunkOn = ArrayList<Boolean>()
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         program = buildProgram(VERT, FRAG)
+        meshProgram = buildProgram(MESH_VERT, MESH_FRAG)
+        mPos = GLES30.glGetAttribLocation(meshProgram, "aPos")
+        mNrm = GLES30.glGetAttribLocation(meshProgram, "aNrm")
+        mMat = GLES30.glGetAttribLocation(meshProgram, "aMat")
+        mMVP = GLES30.glGetUniformLocation(meshProgram, "uMVP")
+        mEye = GLES30.glGetUniformLocation(meshProgram, "uEye")
         aPos = GLES30.glGetAttribLocation(program, "aPos")
         aColor = GLES30.glGetAttribLocation(program, "aColor")
         uMVP = GLES30.glGetUniformLocation(program, "uMVP")
@@ -88,6 +103,8 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         lastNanos = 0L
         uploadedRevision = -1   // context loss: re-upload
         staticVbo = 0
+        meshUploaded = -1
+        meshVbo = 0
     }
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
@@ -102,6 +119,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         game.update(dt)
 
         if (game.machineRevision != uploadedRevision) uploadStatic()
+        if (game.machineRevision != meshUploaded) uploadMesh()
 
         updateCamera(dt)
         buildDynamic(dt)
@@ -132,6 +150,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
 
         for (e in 0 until eyes) {
             GLES30.glViewport(e * vw, 0, vw, height)
+            drawMesh()
             GLES30.glUniformMatrix4fv(uMVP, 1, false, mvp, 0)
             GLES30.glUniform1f(uPoint, 0f)
             drawStatic()
@@ -171,6 +190,73 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         GLES30.glEnableVertexAttribArray(aColor)
         GLES30.glDrawArrays(GLES30.GL_LINES, 0, staticCount)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+    }
+
+    // ---------------------------------------------------------- solid mesh
+
+    private fun uploadMesh() {
+        val m = game.machine
+        if (meshVbo == 0) { val ids = IntArray(1); GLES30.glGenBuffers(1, ids, 0); meshVbo = ids[0] }
+        val fb = ByteBuffer.allocateDirect(m.meshVerts.size * 4)
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+        fb.put(m.meshVerts); fb.position(0)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, meshVbo)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, m.meshVerts.size * 4, fb, GLES30.GL_STATIC_DRAW)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+        meshUploaded = game.machineRevision
+        Log.i("TapKugelbahn", "mesh: ${m.meshVerts.size / 7} verts in ${m.meshChunks.size} chunks")
+    }
+
+    /**
+     * Opaque pass: solid track near the eye, neon everywhere else.
+     *
+     * The swap needs no bookkeeping on the line side. The tubes are swept from
+     * exactly the same centres the rail LINES are drawn along, so a tube sits
+     * over its own line; the mesh writes depth and the lines only test, which
+     * means the neon vanishes precisely where solid geometry replaced it and
+     * survives everywhere else. Chunks flip in and out on a hysteresis band so
+     * a camera hovering at the boundary cannot make the track flicker.
+     */
+    private fun drawMesh() {
+        val m = game.machine
+        if (m.meshChunks.isEmpty()) return
+        GLES30.glUseProgram(meshProgram)
+        GLES30.glUniformMatrix4fv(mMVP, 1, false, mvp, 0)
+        GLES30.glUniform3f(mEye, camPos[0], camPos[1], camPos[2])
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
+        GLES30.glEnable(GLES30.GL_CULL_FACE)
+        GLES30.glCullFace(GLES30.GL_BACK)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, meshVbo)
+        GLES30.glVertexAttribPointer(mPos, 3, GLES30.GL_FLOAT, false, 28, 0)
+        GLES30.glEnableVertexAttribArray(mPos)
+        GLES30.glVertexAttribPointer(mNrm, 3, GLES30.GL_FLOAT, false, 28, 12)
+        GLES30.glEnableVertexAttribArray(mNrm)
+        GLES30.glVertexAttribPointer(mMat, 1, GLES30.GL_FLOAT, false, 28, 24)
+        GLES30.glEnableVertexAttribArray(mMat)
+
+        var verts = 0
+        for (i in m.meshChunks.indices) {
+            val c = m.meshChunks[i]
+            val d = hypot(hypot(camPos[0] - c.cx, camPos[1] - c.cy), camPos[2] - c.cz) - c.rad
+            val was = chunkOn.getOrElse(i) { false }
+            val on = if (was) d < MESH_OUT else d < MESH_IN
+            while (chunkOn.size <= i) chunkOn.add(false)
+            chunkOn[i] = on
+            if (!on) continue
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, c.start, c.count)
+            verts += c.count
+        }
+        meshTrisDrawn = verts / 3
+
+        GLES30.glDisableVertexAttribArray(mPos)
+        GLES30.glDisableVertexAttribArray(mNrm)
+        GLES30.glDisableVertexAttribArray(mMat)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
+        GLES30.glDepthMask(false)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glUseProgram(program)
     }
 
     // ---------------------------------------------------------- camera
@@ -714,9 +800,91 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         // Key light, world space, normalised — used only for the ball's glint,
         // so the highlight sits somewhere consistent as the camera swings
         // rather than sliding around with the eye.
+        // Chunk goes solid inside MESH_IN, reverts to neon outside MESH_OUT.
+        // The gap is the hysteresis that stops boundary flicker.
+        private const val MESH_IN = 3.0f
+        private const val MESH_OUT = 3.6f
+
         private const val KEY_X = -0.40f
         private const val KEY_Y = 0.78f
         private const val KEY_Z = -0.48f
+
+        /**
+         * Solid shading for an ADDITIVE waveguide, where black is not dark —
+         * it is transparent. Three rules follow from that, and they are what
+         * keep the mesh from punching see-through holes in the sculpture:
+         *
+         *  1. Every material starts from an emissive floor, before any light
+         *     is added. There is no path from geometry alone to zero.
+         *  2. Ambient occlusion tints toward cool instead of multiplying down;
+         *     a raw AO multiply would darken creases straight to invisible.
+         *  3. A fragment that still ends up below the haze threshold is
+         *     DISCARDED rather than dimmed — if it merely dimmed it would keep
+         *     writing depth and occlude the glowing line-work behind it,
+         *     reading as a black hole in the machine rather than as absence.
+         *
+         * The fill light exists to make the shadow side a different HUE, not
+         * to add brightness; hue separation is the only shading cue that
+         * survives on a display that cannot draw dark.
+         */
+        private const val MESH_VERT = """#version 300 es
+        in vec3 aPos;
+        in vec3 aNrm;
+        in float aMat;
+        uniform mat4 uMVP;
+        out vec3 vN;
+        out vec3 vW;
+        flat out int vMat;
+        void main() {
+            gl_Position = uMVP * vec4(aPos, 1.0);
+            vN = aNrm;
+            vW = aPos;
+            vMat = int(aMat + 0.5);
+        }
+        """
+
+        private const val MESH_FRAG = """#version 300 es
+        precision mediump float;
+        in vec3 vN;
+        in vec3 vW;
+        flat in int vMat;
+        uniform vec3 uEye;
+        out vec4 fragColor;
+
+        void main() {
+            vec3 albedo; float floorE; float shine; float gain;
+            if (vMat == 1)      { albedo = vec3(0.62,0.42,0.24); floorE = 0.20; shine = 18.0; gain = 0.09; }
+            else if (vMat == 2) { albedo = vec3(0.62,0.48,0.20); floorE = 0.16; shine = 110.0; gain = 1.05; }
+            else                { albedo = vec3(0.42,0.47,0.56); floorE = 0.15; shine = 72.0; gain = 0.85; }
+
+            vec3 N = normalize(vN);
+            vec3 V = normalize(uEye - vW);
+            if (dot(N, V) < 0.0) N = -N;           // tubes are open shells
+
+            vec3 KEY  = normalize(vec3(-0.40, 0.78,-0.48));
+            vec3 FILL = normalize(vec3( 0.62, 0.30, 0.72));
+
+            // wrapped diffuse: never reaches zero on the far side
+            float dk = max(0.0, (dot(N, KEY)  + 0.30) / 1.30);
+            float df = max(0.0, (dot(N, FILL) + 0.55) / 1.55);
+
+            vec3 L = albedo * floorE;                                  // rule 1
+            L += albedo * vec3(1.00,0.96,0.88) * dk * 0.85;
+            L += albedo * vec3(0.55,0.66,0.95) * df * 0.30;            // hue, not brightness
+            float spec = pow(max(0.0, dot(reflect(-KEY, N), V)), shine);
+            L += vec3(1.0,0.97,0.90) * spec * gain;
+            // rim: grazing angles pile up, which is what says "round" here
+            float rim = pow(1.0 - max(0.0, dot(N, V)), 3.0);
+            L += albedo * rim * 0.45;
+
+            float lum = max(max(L.r, L.g), L.b);
+            if (lum < 0.030) discard;                                  // rule 3
+            L *= smoothstep(0.030, 0.085, lum);
+            L = L / (1.0 + L / 2.6);                                   // extended Reinhard
+            L = pow(L, vec3(1.0/1.9));
+            fragColor = vec4(L, lum);
+        }
+        """
 
         private const val VERT = """#version 300 es
         in vec3 aPos;
