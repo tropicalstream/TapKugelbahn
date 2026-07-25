@@ -75,6 +75,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     private val bt = FloatArray(3)
     private val ballScratch = FloatArray(3)
     private val chunkOn = ArrayList<Boolean>()
+    private var footprintsLogged = false
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -179,6 +180,10 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         staticCount = m.staticCount
         uploadedRevision = game.machineRevision
         Log.i("TapKugelbahn", "machine L${game.level}: ${m.length.toInt()}m track, $staticCount static verts")
+        if (!footprintsLogged) {
+            footprintsLogged = true
+            for (line in Steps.report().trim().split("\n")) Log.i("TapKugelbahn", line)
+        }
     }
 
     private fun drawStatic() {
