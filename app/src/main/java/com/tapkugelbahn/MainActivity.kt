@@ -16,13 +16,17 @@ import android.view.WindowManager
 import com.tapkugelbahn.audio.Sfx
 import com.tapkugelbahn.engine.Game
 import com.tapkugelbahn.engine.GameHost
+import com.tapkugelbahn.engine.SW_BACK
+import com.tapkugelbahn.engine.SW_DOWN
+import com.tapkugelbahn.engine.SW_FWD
+import com.tapkugelbahn.engine.SW_UP
 import com.tapkugelbahn.gl.GLRenderer
 import kotlin.math.max
 
 /**
  * TapKugelbahn — the kinetic rolling-ball sculpture.
- * TAP drops a ball · SWIPE cycles the view (auto-director first) ·
- * DOUBLE-TAP advances once the level is complete.
+ * TAP drops a ball · SWIPE walks the vantages either way (auto-director
+ * first) · DOUBLE-TAP advances once the level is complete.
  */
 class MainActivity : Activity(), GameHost {
 
@@ -88,6 +92,16 @@ class MainActivity : Activity(), GameHost {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // The glasses deliver a temple DOUBLE-TAP as KEYCODE_BACK. Nothing here
+        // ever claimed it, so a real double-tap fell through to the system and
+        // CLOSED THE APP — the advance-on-double-tap path only ever appeared to
+        // work because adb sends paired ENTERs, which pair up in tapUp() below.
+        // Handle it on its own rather than folding it into the tap set: tapUp()
+        // would postDelay a single tap and drop a ball instead.
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP) glView.queueEvent { game.doubleTap() }
+            return true
+        }
         val isTap = event.keyCode == KeyEvent.KEYCODE_BUTTON_A ||
             event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
             event.keyCode == KeyEvent.KEYCODE_ENTER ||
@@ -112,7 +126,16 @@ class MainActivity : Activity(), GameHost {
                 val dist = kotlin.math.hypot(dx, dy)
                 val thresh = max(48f, 0.09f * resources.displayMetrics.widthPixels)
                 if (dist >= thresh) {
-                    glView.queueEvent { game.swipe() }
+                    // Dominant axis on finger-up — one gesture, one step. The
+                    // direction used to be measured and then thrown away, so
+                    // every swipe went forward and the cursor work to come had
+                    // nothing to build on.
+                    val dir = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) {
+                        if (dx > 0f) SW_FWD else SW_BACK
+                    } else {
+                        if (dy > 0f) SW_DOWN else SW_UP   // screen y grows downward
+                    }
+                    glView.queueEvent { game.swipe(dir) }
                 } else if (SystemClock.uptimeMillis() - downT <= 320) {
                     val now = SystemClock.uptimeMillis()
                     if (now - lastKeyTap >= 60) { lastKeyTap = now; tapUp() }

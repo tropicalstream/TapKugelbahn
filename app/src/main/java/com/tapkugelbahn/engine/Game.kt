@@ -32,12 +32,16 @@ class Ball(
     val pos = FloatArray(3)
 }
 
+// Swipe directions, classified on finger-up from the dominant axis.
+const val SW_FWD = 0
+const val SW_BACK = 1
+const val SW_UP = 2
+const val SW_DOWN = 3
+
 /**
- * The rules: TAP drops a ball from five diameters above the intake. To win a
- * level, at least two balls must be in flight together — the second dropped
- * before the first finishes — and neither may ever touch another ball before
- * both complete the course. Balls then keep looping via the elevator forever;
- * DOUBLE-TAP advances once the level is complete. SWIPE cycles the four views.
+ * The rules: TAP drops a ball from five diameters above the intake. Balls keep
+ * looping via the elevator forever; DOUBLE-TAP advances once the level is
+ * complete. SWIPE walks the vantages, forward or back.
  */
 class Game(private val store: SettingsStore, private val host: GameHost) {
 
@@ -114,8 +118,18 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         }
     }
 
-    fun swipe() {
-        view = (view + 1) % VIEW_NAMES.size
+    /**
+     * One discrete swipe = one step, classified on finger-up (the suite's
+     * temple-pad convention). Forward/back walk the vantages in both
+     * directions — until now every swipe went forward only, so getting back
+     * to a view you had just passed meant cycling through all five.
+     *
+     * Vertical currently mirrors horizontal so nothing regresses; the edit
+     * mode that is coming will reinterpret up/down against the slot palette.
+     */
+    fun swipe(dir: Int) {
+        val step = if (dir == SW_BACK || dir == SW_DOWN) -1 else 1
+        view = (view + step + VIEW_NAMES.size) % VIEW_NAMES.size
         viewFlash = 1.6f
         host.sfx(S_CLACK, 1.8f, 0.35f)
     }
