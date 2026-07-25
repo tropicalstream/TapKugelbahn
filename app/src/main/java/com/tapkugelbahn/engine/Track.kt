@@ -303,13 +303,25 @@ class TrackBuilder {
 
     /** Gravity funnel: ball spirals a shrinking cone into the center hole. */
     fun gravityFunnel(hue: Float) {
-        val cx0 = x + sin(yaw) * 1.05f
-        val cz0 = z + cos(yaw) * 1.05f
+        // The spiral's centre belongs to the SIDE of the cursor, not straight
+        // ahead of it. Placed ahead, the ball arrives pointing at the centre
+        // and the first sample of the spiral is already travelling
+        // circumferentially — it got flung sideways through 87 degrees in a
+        // single step, at the lip, which is exactly where a funnel should feel
+        // smoothest. (Position was continuous either way, which is why this
+        // survived: the a0 term cancelled the offset. Only the TANGENT was
+        // wrong.) Centre to the side, entry angle likewise, and the ball now
+        // enters within 3 degrees of its incoming direction.
+        val cx0 = x + sin(yaw + PI.toFloat() / 2) * 1.05f
+        val cz0 = z + cos(yaw + PI.toFloat() / 2) * 1.05f
         val topY = y
         val sSpiral = approxS
-        // spiral in: radius 1.05 → 0.2 over 2.6 turns, dropping 0.9
-        val turns = 2.6f; val n = (turns * 56).toInt()
-        val a0 = yaw + PI.toFloat()
+        // Whole turns: a fractional count leaves the throat pointing wherever
+        // it happens to stop, and the exit joint inherits the error. Two turns
+        // also widens the radial step per coil to 0.425 m, so the tunnel hoops
+        // (0.198 m radius, needing 0.396 m) stop interpenetrating.
+        val turns = 2f; val n = (turns * 56).toInt()
+        val a0 = yaw - PI.toFloat() / 2
         for (i in 1..n) {
             val t = i.toFloat() / n
             val r = 1.05f - 0.85f * t
@@ -427,14 +439,43 @@ class TrackBuilder {
     }
 
     /** Rocker arm / seesaw. */
+    /**
+     * The see-saw (Wippe). The ball used to travel a dead-straight ramp while
+     * a beam was animated tilting underneath it — the plank chased the ball
+     * instead of carrying it, and by the exit the drawn beam sat 0.31 m (two
+     * and a half ball diameters) above where the deck should have been, with
+     * the ball sailing along underneath it. The tilt also ran the wrong way,
+     * lifting the end the ball was heading for.
+     *
+     * Now the plank's swept contact surface IS the centreline, so there is
+     * nothing to keep in sync: the existing physics reads the tipping straight
+     * out of the baked slope, and the renderer solves the same angle function
+     * back from the rider, so beam and ball cannot disagree.
+     *
+     * The sequence is the one a real Wippe gives you. At rest the ENTRY end is
+     * down against its stop — the ball's own weight ahead of the axle holds it
+     * there — so the ball must climb the last 0.07 m to the pivot, slowing as
+     * it goes. Past the axle its weight reverses the torque, the plank goes
+     * over, and it accelerates down a 17 degree chute. No pause zone: the
+     * hesitation is real, produced by the gradient, not scripted.
+     */
     fun rockerArm(hue: Float) {
         val s0 = approxS
         val fx = sin(yaw); val fz = cos(yaw)
-        mechs.add(Mech(M_ROCKER, x + fx * 0.7f, y - 0.05f, z + fz * 0.7f, yaw, 0.7f, 0f, hue))
-        straight(1.4f, -0.12f)
-        zones.add(Zone(s0 + 0.4f, approxS - 0.3f, Z_PAUSE, speed = 1.0f, pause = 0.45f))
+        val sx = x; val sy = y; val sz = z
+        // Put the axle where the resting deck's entry end meets the cursor.
+        val axleY = sy + ROCK_A * sin(ROCK_REST)
+        mechs.add(Mech(M_ROCKER, sx + fx * ROCK_A, axleY, sz + fz * ROCK_A, yaw, ROCK_A, 0f, hue))
+        val n = 30
+        for (i in 1..n) {
+            val u = i.toFloat() / n
+            val xi = (2f * u - 1f) * ROCK_A          // signed distance from the axle
+            val fwd = 2f * ROCK_A * u
+            emit(sx + fx * fwd, axleY + xi * sin(rockerAngle(u)), sz + fz * fwd)
+        }
         mechs.last().s0 = s0; mechs.last().s1 = approxS
-        notes.add(Note(s0 + 0.55f, S_CLACK, 0.8f, 0.9f))
+        // the knock as the plank meets its lower stop, just after the tip
+        notes.add(Note(s0 + ROCK_A * 1.7f, S_CLACK, 0.8f, 0.95f))
     }
 
     /** Counterweighted tipping bucket. */
@@ -812,6 +853,21 @@ class TrackBuilder {
     }
 
     companion object {
+        // See-saw geometry. ONE definition, shared by the builder that bakes
+        // the ball's path and the renderer that draws the plank, so the two
+        // can never drift apart — which is precisely how the old version ended
+        // up with the beam a quarter-metre away from the ball.
+        const val ROCK_A = 0.7f          // half-length of the plank
+        const val ROCK_REST = 0.10f      // entry end down: the ball climbs to the axle
+        const val ROCK_TIP = -0.30f      // gone over: a 17-degree chute out
+
+        /** Plank angle as a function of the ball's progress across it. */
+        fun rockerAngle(u: Float): Float {
+            if (u <= 0.5f) return ROCK_REST                 // held on its stop
+            val k = ((u - 0.5f) / 0.32f).coerceIn(0f, 1f)   // over-centre, then the far stop
+            return ROCK_REST + (ROCK_TIP - ROCK_REST) * (k * k * (3f - 2f * k))
+        }
+
         // Solid rail tubes: 6 sides is enough at this scale, and a ring every
         // other centreline sample (~0.18 m) still curves cleanly through a
         // loop while keeping the triangle count in budget.

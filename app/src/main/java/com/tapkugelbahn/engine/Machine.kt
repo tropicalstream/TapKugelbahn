@@ -34,7 +34,7 @@ object Machine {
                 b.loop(0.55f)
                 b.propeller(0.62f)
                 b.cylArc(r, 1.3f, -0.25f)
-                b.helix(0.8f, 1.5f, 0.85f)          // corkscrew bulge
+                b.helix(0.8f, 2f, 0.85f)          // corkscrew bulge
                 b.cylArc(r, 1.4f, -0.25f)
                 b.snake(0.3f, 2)
                 b.cylArc(r, 1.2f, -0.2f)
@@ -92,7 +92,7 @@ object Machine {
                 b.loop(0.6f)
                 b.propeller(0.62f); b.propeller(0.9f)
                 b.cylArc(r, 1.3f, -0.3f)
-                b.helix(0.85f, 1.8f, 1.1f)
+                b.helix(0.85f, 2f, 1.1f)
                 b.cylArc(r, 1.35f, -0.3f)
                 b.newtonsCradle(0.6f)
                 b.cylArc(r, 1.3f, -0.25f)
@@ -114,7 +114,7 @@ object Machine {
                 b.cylArc(r, 0.5f, -0.2f)
                 b.newtonsCradle(0.6f)
                 b.cylArc(r, 0.55f, -0.25f)
-                b.helix(0.9f, 1.5f, 0.95f)
+                b.helix(0.9f, 2f, 0.95f)
                 // -- dive to the inner ring: rotation band --
                 b.cylArc(rIn, 0.8f, -0.35f)
                 b.gaussCannon(0.13f)
@@ -141,7 +141,7 @@ object Machine {
                 b.cylArc(r, 0.45f, -0.45f)
                 b.loop(0.5f)
                 b.cylArc(r, 0.6f, -0.3f)
-                b.helix(1.0f, 2.2f, 1.4f)
+                b.helix(1.0f, 2f, 1.4f)
                 b.cylArc(r, 0.6f, -0.25f)
                 b.xylophone(0.55f, 6)
                 b.cylArc(r, 0.7f, -0.25f)

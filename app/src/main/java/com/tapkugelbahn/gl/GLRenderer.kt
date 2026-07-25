@@ -437,18 +437,31 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 pendulum(bx, topY, bz, fxd, fzd, swing + idle, c)     // far ball flies
             }
             M_ROCKER -> {
-                // The beam TIPS UNDER THE BALL: level until the ball rolls on,
-                // then it leans progressively toward the exit side.
+                // The plank angle is SOLVED from the rider using the very
+                // function the builder baked the ball's path with, so the deck
+                // is guaranteed to be under the ball rather than merely near
+                // it. With no rider it sits on its rest stop, waiting.
                 val rider = ridingBall(mc)
-                val target = if (rider != null) {
-                    val u = ((rider.s - mc.s0) / (mc.s1 - mc.s0)).coerceIn(0f, 1f)
-                    (u - 0.35f) * 0.42f
-                } else 0f
-                mc.phase += (target - mc.phase) * (1f - exp(-6f * dt))
-                val tilt = mc.phase
+                val tilt = if (rider != null)
+                    TrackBuilder.rockerAngle(((rider.s - mc.s0) / (mc.s1 - mc.s0)).coerceIn(0f, 1f))
+                else TrackBuilder.ROCK_REST
+                mc.phase = tilt
                 val hx = fxd * mc.a; val hz = fzd * mc.a
-                dyn.line(mc.x - hx, mc.y - sin(tilt) * mc.a, mc.z - hz,
-                    mc.x + hx, mc.y + sin(tilt) * mc.a, mc.z + hz, c[0], c[1], c[2], 0.9f)
+                val dy = sin(tilt) * mc.a
+                // plank drawn with thickness, so the ball rests ON something
+                for (side in intArrayOf(-1, 1)) {
+                    val ox = lxd * 0.05f * side; val oz = lzd * 0.05f * side
+                    dyn.line(mc.x - hx + ox, mc.y - dy, mc.z - hz + oz,
+                        mc.x + hx + ox, mc.y + dy, mc.z + hz + oz, c[0], c[1], c[2], 0.9f)
+                    dyn.line(mc.x - hx + ox, mc.y - dy - 0.035f, mc.z - hz + oz,
+                        mc.x + hx + ox, mc.y + dy - 0.035f, mc.z + hz + oz, c[0], c[1], c[2], 0.5f)
+                }
+                // end caps, so the plank reads as a board and not two wires
+                dyn.line(mc.x - hx - lxd * 0.05f, mc.y - dy, mc.z - hz - lzd * 0.05f,
+                    mc.x - hx + lxd * 0.05f, mc.y - dy, mc.z - hz + lzd * 0.05f, c[0], c[1], c[2], 0.8f)
+                dyn.line(mc.x + hx - lxd * 0.05f, mc.y + dy, mc.z + hz - lzd * 0.05f,
+                    mc.x + hx + lxd * 0.05f, mc.y + dy, mc.z + hz + lzd * 0.05f, c[0], c[1], c[2], 0.8f)
+                // the trestle it pivots on
                 dyn.line(mc.x - lxd * 0.08f, mc.y - 0.16f, mc.z - lzd * 0.08f, mc.x, mc.y, mc.z, 0.7f, 0.7f, 0.8f, 0.7f)
                 dyn.line(mc.x + lxd * 0.08f, mc.y - 0.16f, mc.z + lzd * 0.08f, mc.x, mc.y, mc.z, 0.7f, 0.7f, 0.8f, 0.7f)
             }
