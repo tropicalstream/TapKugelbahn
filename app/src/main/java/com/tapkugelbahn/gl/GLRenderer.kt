@@ -65,6 +65,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
 
     private val bp = FloatArray(3)
     private val bt = FloatArray(3)
+    private val ballScratch = FloatArray(3)
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -404,6 +405,20 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         ringXZ(ex, ey, ez, BALL_R * 0.7f, 8, c[0], c[1], c[2], 0.9f)
     }
 
+    /**
+     * The ball, still drawn as glowing vector line-work rather than a shaded
+     * solid, but doing more of what a real sphere does.
+     *
+     * A wireframe cage of flat-alpha rings reads as a cage. The cue that sells
+     * roundness in line-work is the SILHOUETTE: on a real sphere the surface
+     * turns away at the rim, so grazing edges pile up and glow while the parts
+     * facing you fall away. So every segment's alpha now comes from how
+     * edge-on it is to the eye — bright at the limb, dim through the middle.
+     * Latitude bands ride the roll axis so the spin is legible as rotation of
+     * a body rather than a spinning hoop, a glint sits where a polished ball
+     * would catch the key light, and a short ghost trail appears once the ball
+     * is genuinely moving.
+     */
     private fun drawBall(b: Ball) {
         val m = game.machine
         val r = BALL_R
@@ -418,29 +433,81 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         // rotated basis vectors t' and u'
         val t1x = bt[0] * cR + ux * sR; val t1y = bt[1] * cR + uy * sR; val t1z = bt[2] * cR + uz * sR
         val u1x = -bt[0] * sR + ux * cR; val u1y = -bt[1] * sR + uy * cR; val u1z = -bt[2] * sR + uz * cR
-        // three orthogonal rings = the vector sphere
-        ring3(px, py, pz, t1x, t1y, t1z, u1x, u1y, u1z, r, col, 1f)          // motion plane (spins!)
-        ring3(px, py, pz, lx, 0f, lz, u1x, u1y, u1z, r, col, 0.55f)
-        ring3(px, py, pz, t1x, t1y, t1z, lx, 0f, lz, r, col, 0.55f)
-        fx.v(px, py, pz, col[0], col[1], col[2], 1f)
+
+        // ghost trail: the sphere a few centimetres back along the rail, twice,
+        // shrinking and fading. Only once it is actually travelling, so a ball
+        // resting in a bucket or cradle stays clean.
+        if (b.v > 1.2f && !b.dropping && b.pauseT <= 0f) {
+            val lag = (b.v * 0.016f).coerceAtMost(0.09f)
+            for (k in 1..2) {
+                val sg = b.s - lag * k
+                if (sg < 0f) continue
+                m.pos(sg, ballScratch)
+                val gr = r * (1f - 0.20f * k)
+                val ga = 0.30f / k * ((b.v - 1.2f) / 2.0f).coerceIn(0f, 1f)
+                ringRim(ballScratch[0], ballScratch[1] + r * 0.55f, ballScratch[2],
+                    t1x, t1y, t1z, u1x, u1y, u1z, gr, col, ga, 10)
+            }
+        }
+
+        // three great circles + two latitude bands about the roll axis
+        ringRim(px, py, pz, t1x, t1y, t1z, u1x, u1y, u1z, r, col, 1f, 16)   // motion plane (spins!)
+        ringRim(px, py, pz, lx, 0f, lz, u1x, u1y, u1z, r, col, 0.7f, 16)
+        ringRim(px, py, pz, t1x, t1y, t1z, lx, 0f, lz, r, col, 0.7f, 16)
+        for (s in intArrayOf(-1, 1)) {
+            val lat = 0.66f                       // ~ +/-41 degrees
+            val cl = cos(lat); val sl = sin(lat) * s
+            // band circle: radius r*cos(lat), centre pushed along the roll axis
+            ringRim(px + lx * r * sl, py, pz + lz * r * sl,
+                t1x, t1y, t1z, u1x, u1y, u1z, r * cl, col, 0.42f, 14)
+        }
+
+        // specular glint where a polished ball would catch the key light:
+        // the surface point whose normal bisects eye and light.
+        var hx = KEY_X; var hy = KEY_Y; var hz = KEY_Z
+        var vx = camPos[0] - px; var vy = camPos[1] - py; var vz = camPos[2] - pz
+        val vl = hypot(hypot(vx, vy), vz).coerceAtLeast(1e-4f); vx /= vl; vy /= vl; vz /= vl
+        hx += vx; hy += vy; hz += vz
+        val hl = hypot(hypot(hx, hy), hz).coerceAtLeast(1e-4f); hx /= hl; hy /= hl; hz /= hl
+        fx.v(px + hx * r * 0.92f, py + hy * r * 0.92f, pz + hz * r * 0.92f, 1f, 1f, 1f, 1f)
+
+        // The core dot is a distance cue, not part of the sphere. Up close a
+        // bright centre makes a solid ball read as a hollow lantern, so it
+        // fades away as you approach; far off, where the rings collapse to a
+        // scribble, it becomes the thing that says "the ball is there".
+        val dcam = hypot(hypot(camPos[0] - px, camPos[1] - py), camPos[2] - pz)
+        val coreA = 0.14f + 0.76f * ((dcam - 1.1f) / 3.2f).coerceIn(0f, 1f)
+        fx.v(px, py, pz, col[0], col[1], col[2], coreA)
     }
 
-    /** Circle in the plane spanned by unit vectors A and B around center. */
-    private fun ring3(cx: Float, cy: Float, cz: Float,
-                      axx: Float, axy: Float, axz: Float,
-                      bxx: Float, bxy: Float, bxz: Float,
-                      r: Float, c: FloatArray, alpha: Float) {
-        val segs = 12
+    /**
+     * A ring like ring3, but each segment's brightness follows how edge-on it
+     * is to the camera — the limb of the sphere glows, the face falls away.
+     * That single term is what stops the wireframe reading as a flat cage.
+     */
+    private fun ringRim(cx: Float, cy: Float, cz: Float,
+                        axx: Float, axy: Float, axz: Float,
+                        bxx: Float, bxy: Float, bxz: Float,
+                        r: Float, c: FloatArray, alpha: Float, segs: Int) {
+        var ex = cx - camPos[0]; var ey = cy - camPos[1]; var ez = cz - camPos[2]
+        val el = hypot(hypot(ex, ey), ez).coerceAtLeast(1e-4f); ex /= el; ey /= el; ez /= el
         var pxp = cx + axx * r; var pyp = cy + axy * r; var pzp = cz + axz * r
-        for (i in 1..segs) {
+        var pa = 0f
+        for (i in 0..segs) {
             val a = i * 2f * PI.toFloat() / segs
-            val qx = cx + (axx * cos(a) + bxx * sin(a)) * r
-            val qy = cy + (axy * cos(a) + bxy * sin(a)) * r
-            val qz = cz + (axz * cos(a) + bxz * sin(a)) * r
-            dyn.line(pxp, pyp, pzp, qx, qy, qz, c[0], c[1], c[2], alpha)
-            pxp = qx; pyp = qy; pzp = qz
+            val ca = cos(a); val sa = sin(a)
+            val nx = axx * ca + bxx * sa
+            val ny = axy * ca + bxy * sa
+            val nz = axz * ca + bxz * sa
+            // 1 at the silhouette, 0 pointing straight at the eye
+            val rim = 1f - abs(nx * ex + ny * ey + nz * ez)
+            val av = alpha * (0.18f + 0.82f * rim * rim)
+            val qx = cx + nx * r; val qy = cy + ny * r; val qz = cz + nz * r
+            if (i > 0) dyn.line(pxp, pyp, pzp, qx, qy, qz, c[0], c[1], c[2], (pa + av) * 0.5f)
+            pxp = qx; pyp = qy; pzp = qz; pa = av
         }
     }
+
 
     private fun ringXZ(cx: Float, cy: Float, cz: Float, r: Float, segs: Int, cr: Float, cg: Float, cb: Float, a: Float) {
         var pa = 0f
@@ -580,6 +647,13 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     }
 
     companion object {
+        // Key light, world space, normalised — used only for the ball's glint,
+        // so the highlight sits somewhere consistent as the camera swings
+        // rather than sliding around with the eye.
+        private const val KEY_X = -0.40f
+        private const val KEY_Y = 0.78f
+        private const val KEY_Z = -0.48f
+
         private const val VERT = """#version 300 es
         in vec3 aPos;
         in vec4 aColor;
