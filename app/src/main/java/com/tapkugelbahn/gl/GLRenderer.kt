@@ -386,15 +386,33 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                     val a = mc.phase + k * PI.toFloat() / 4f
                     val px = mc.x + fxd * sin(a) * r; val py = mc.y + cos(a) * r; val pz = mc.z + fzd * sin(a) * r
                     dyn.line(mc.x, mc.y, mc.z, px, py, pz, c[0], c[1], c[2], 0.55f)
-                    // gondola basket — the container the ball rides in
-                    val gw = 0.16f; val gd = 0.15f
-                    val bx0 = px - fxd * gw; val bz0 = pz - fzd * gw
-                    val bx1 = px + fxd * gw; val bz1 = pz + fzd * gw
-                    dyn.line(px, py, pz, bx0, py - 0.06f, bz0, 1f, 1f, 1f, 0.6f)
-                    dyn.line(px, py, pz, bx1, py - 0.06f, bz1, 1f, 1f, 1f, 0.6f)
-                    dyn.line(bx0, py - 0.06f, bz0, bx0, py - gd, bz0, 1f, 1f, 1f, 0.7f)
-                    dyn.line(bx1, py - 0.06f, bz1, bx1, py - gd, bz1, 1f, 1f, 1f, 0.7f)
-                    dyn.line(bx0, py - gd, bz0, bx1, py - gd, bz1, 1f, 1f, 1f, 0.7f)
+                    // Gondola: an open basket with real width, HANGING from
+                    // its pivot so it stays upright all the way round — the way
+                    // a ferris car actually behaves. It was a flat five-line
+                    // bracket in the wheel's plane, with no width at all, so a
+                    // ball never looked like it was inside anything.
+                    val gw = 0.135f      // half-width across the wheel
+                    val gl = 0.145f      // half-length along it
+                    val gd = 0.165f      // depth
+                    val hang = 0.055f    // pivot to the mouth
+                    fun gx(f: Float, l: Float) = px + fxd * f + lxd * l
+                    fun gz(f: Float, l: Float) = pz + fzd * f + lzd * l
+                    val mouthY = py - hang
+                    val floorY = mouthY - gd
+                    dyn.line(px, py, pz, gx(0f, 0f), mouthY, gz(0f, 0f), 0.85f, 0.88f, 0.95f, 0.7f)
+                    for (sf in intArrayOf(-1, 1)) {
+                        val f = gl * sf
+                        dyn.line(gx(f, -gw), mouthY, gz(f, -gw), gx(f, gw), mouthY, gz(f, gw), 1f, 1f, 1f, 0.75f)
+                        dyn.line(gx(f, -gw), floorY, gz(f, -gw), gx(f, gw), floorY, gz(f, gw), 1f, 1f, 1f, 0.9f)
+                        for (sl in intArrayOf(-1, 1))
+                            dyn.line(gx(f, gw * sl), mouthY, gz(f, gw * sl),
+                                     gx(f, gw * sl), floorY, gz(f, gw * sl), 1f, 1f, 1f, 0.8f)
+                    }
+                    for (sl in intArrayOf(-1, 1)) {
+                        val l = gw * sl
+                        dyn.line(gx(-gl, l), mouthY, gz(-gl, l), gx(gl, l), mouthY, gz(gl, l), 1f, 1f, 1f, 0.75f)
+                        dyn.line(gx(-gl, l), floorY, gz(-gl, l), gx(gl, l), floorY, gz(gl, l), 1f, 1f, 1f, 0.9f)
+                    }
                 }
             }
             M_SCREW -> {
@@ -494,31 +512,45 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 dyn.line(mc.x + lxd * 0.08f, mc.y - 0.16f, mc.z + lzd * 0.08f, mc.x, mc.y, mc.z, 0.7f, 0.7f, 0.8f, 0.7f)
             }
             M_BUCKET -> {
-                // The bucket CATCHES the ball: upright while the ball sits in
-                // it, then tips with the counterweight to pour it onward.
+                // A real open box: floor, four walls, open top — hinged at its
+                // forward lip and solved from the SAME angle function the
+                // builder baked the ball's path with, so the ball is genuinely
+                // sitting in the bucket rather than beside a flat outline.
                 val rider = ridingBall(mc)
-                val target = if (rider != null && rider.pauseT > 0f) {
-                    val prog = 1f - (rider.pauseT / 0.8f).coerceIn(0f, 1f)
-                    if (prog < 0.4f) 0f else (prog - 0.4f) / 0.6f * 0.85f
-                } else if (rider != null) 0.85f else 0f
-                mc.phase += (target - mc.phase) * (1f - exp(-9f * dt))
-                val tip = mc.phase
-                val bx = mc.x; val by = mc.y; val bz = mc.z
-                // open bucket box, hinged at its forward lip, wrapping the ball
-                val s = mc.a; val d = s * 0.7f
-                val cT = cos(tip); val sT = sin(tip)
-                // back wall top/bottom, rotated about the lip at (bx,by)
-                val backTx = bx - fxd * s * cT; val backTy = by + s * sT
-                val backBx = bx - fxd * s * cT + fxd * 0f; val backBy = backTy - d * cT
-                dyn.line(bx, by, bz, backTx, backTy, bz - fzd * s * (1f - cT), c[0], c[1], c[2], 0.95f)
-                dyn.line(bx, by - d, bz, backTx, backBy, bz - fzd * s * (1f - cT), c[0], c[1], c[2], 0.95f)
-                dyn.line(bx, by, bz, bx, by - d, bz, c[0], c[1], c[2], 0.95f)
-                dyn.line(backTx, backTy, bz - fzd * s * (1f - cT), backTx, backBy, bz - fzd * s * (1f - cT), c[0], c[1], c[2], 0.95f)
-                // side rails of the bucket mouth
-                dyn.line(bx - lxd * s * 0.5f, by, bz - lzd * s * 0.5f, bx + lxd * s * 0.5f, by, bz + lzd * s * 0.5f, c[0], c[1], c[2], 0.6f)
-                // counterweight arm sinks as the bucket tips
-                dyn.line(bx, by, bz, bx - fxd * mc.b, by - tip * 0.3f, bz - fzd * mc.b, 0.8f, 0.7f, 0.5f, 0.8f)
-                boxAt(bx - fxd * mc.b, by - tip * 0.3f, bz - fzd * mc.b, 0.09f, 0.9f, 0.75f, 0.4f, 0.9f)
+                val tip = if (rider != null)
+                    TrackBuilder.bucketTip(((rider.s - mc.s0) / (mc.s1 - mc.s0)).coerceIn(0f, 1f))
+                else 0f
+                mc.phase = tip
+                val ct = cos(tip); val st = sin(tip)
+                val S = TrackBuilder.BUCKET_S; val D = TrackBuilder.BUCKET_D
+                val W = TrackBuilder.BUCKET_W
+                // local (fwd, up, lat) about the lip -> world, rotated by tip
+                fun px(f: Float, u: Float, l: Float) = mc.x + fxd * (f * ct - u * st) + lxd * l
+                fun py(f: Float, u: Float) = mc.y + (f * st + u * ct)
+                fun pz(f: Float, u: Float, l: Float) = mc.z + fzd * (f * ct - u * st) + lzd * l
+                fun edge(f0: Float, u0: Float, l0: Float, f1: Float, u1: Float, l1: Float, a: Float) =
+                    dyn.line(px(f0, u0, l0), py(f0, u0), pz(f0, u0, l0),
+                             px(f1, u1, l1), py(f1, u1), pz(f1, u1, l1), c[0], c[1], c[2], a)
+                val back = -2f * S
+                for (sgn in intArrayOf(-1, 1)) {
+                    val l = W * sgn
+                    edge(back, -D, l, 0f, -D, l, 0.95f)      // floor rail
+                    edge(back, 0f, l, 0f, 0f, l, 0.8f)       // mouth rail
+                    edge(back, -D, l, back, 0f, l, 0.9f)     // back upright
+                    edge(0f, -D, l, 0f, 0f, l, 0.9f)         // lip upright
+                }
+                edge(back, -D, -W, back, -D, W, 0.95f)       // floor, across
+                edge(0f, -D, -W, 0f, -D, W, 0.95f)
+                edge(back, 0f, -W, back, 0f, W, 0.8f)        // mouth, across
+                edge(0f, 0f, -W, 0f, 0f, W, 0.8f)
+                // hinge pin and the counterweight that drags it over
+                dyn.line(mc.x - lxd * W * 1.3f, mc.y, mc.z - lzd * W * 1.3f,
+                    mc.x + lxd * W * 1.3f, mc.y, mc.z + lzd * W * 1.3f, 0.8f, 0.8f, 0.9f, 0.8f)
+                val aw = 0.30f
+                val cwF = aw * ct; val cwU = aw * st
+                dyn.line(mc.x, mc.y, mc.z,
+                    mc.x + fxd * cwF, mc.y + cwU, mc.z + fzd * cwF, 0.85f, 0.72f, 0.5f, 0.85f)
+                boxAt(mc.x + fxd * cwF, mc.y + cwU, mc.z + fzd * cwF, 0.075f, 0.9f, 0.75f, 0.4f, 0.9f)
             }
             M_ELEV -> {
                 mc.phase = (mc.phase + dt * 0.75f) % 0.28f

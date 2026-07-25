@@ -598,14 +598,45 @@ class TrackBuilder {
     }
 
     /** Counterweighted tipping bucket. */
+    /**
+     * The tipping bucket. The ball rolls into it, sits in the bottom while it
+     * fills, then the bucket overbalances and POURS it out and onward.
+     *
+     * Previously this was two steep straight ramps with a Z_PAUSE across them:
+     * the ball froze dead in mid-air, halfway down a slope, while a box was
+     * animated alongside it. There was no bucket floor anywhere in the path,
+     * which is why the mechanism read as confusing — nothing the ball did
+     * corresponded to anything the bucket appeared to be doing.
+     *
+     * The ball's path is now the position of the BUCKET FLOOR as the bucket
+     * tips: it rests at the bottom, then swings forward and down through the
+     * pour, so what you see carrying the ball is what is actually carrying it.
+     */
     fun tippingBucket(hue: Float) {
-        val s0 = approxS
-        straight(0.35f, -0.3f)   // small drop into the bucket
-        mechs.add(Mech(M_BUCKET, x, y, z, yaw, 0.34f, 0.5f, hue))
-        straight(0.75f, -0.35f)
-        zones.add(Zone(s0 + 0.3f, s0 + 0.75f, Z_PAUSE, speed = 1.2f, pause = 0.8f))
-        mechs.last().s0 = s0 + 0.3f; mechs.last().s1 = s0 + 0.75f
-        notes.add(Note(s0 + 0.35f, S_CLACK, 0.6f, 1f))
+        straight(0.40f, -0.24f)          // roll in over the lip
+        val fx = sin(yaw); val fz = cos(yaw)
+        // The ball is now on the floor. The lip it hinges about is ahead of and
+        // above the ball, so the resting ball sits at local (-S, -D).
+        val pivX = x + fx * BUCKET_S; val pivY = y + BUCKET_D; val pivZ = z + fz * BUCKET_S
+        mechs.add(Mech(M_BUCKET, pivX, pivY, pivZ, yaw, BUCKET_S, BUCKET_D, hue))
+        val sPour = approxS
+        val n = 24
+        for (i in 1..n) {
+            val u = i.toFloat() / n
+            val th = bucketTip(u)
+            val f = -BUCKET_S * cos(th) + BUCKET_D * sin(th)
+            val up = -BUCKET_S * sin(th) - BUCKET_D * cos(th)
+            emit(pivX + fx * f, pivY + up, pivZ + fz * f)
+        }
+        val span = approxS - sPour
+        mechs.last().s0 = sPour; mechs.last().s1 = approxS
+        // It HOLDS while it fills — a slow creep rather than a dead stop, so the
+        // engine can never strand the ball the way a zero-speed pause does — and
+        // then gravity takes it down the pour.
+        zones.add(Zone(sPour, sPour + span * 0.45f, Z_FERRIS, speed = 0.30f))
+        notes.add(Note(sPour + 0.02f, S_CLACK, 0.6f, 1f))          // drops in
+        notes.add(Note(sPour + span * 0.5f, S_RATCHET, 0.7f, 0.8f)) // overbalances
+        straight(0.45f, -0.30f)
     }
 
     /** Gauss cannon: coil rings, sudden magnetic launch. */
@@ -1003,6 +1034,21 @@ class TrackBuilder {
     }
 
     companion object {
+        // Tipping-bucket geometry, shared by the builder that bakes the ball's
+        // path and the renderer that draws the box, so the ball is always on
+        // the floor it appears to be sitting on.
+        const val BUCKET_S = 0.30f       // lip to the ball's resting spot
+        const val BUCKET_D = 0.26f       // floor depth below the lip
+        const val BUCKET_W = 0.20f       // half-width across the track
+        const val BUCKET_POUR = 1.15f    // radians it swings through
+
+        /** Bucket angle against the ball's progress: holds, then pours. */
+        fun bucketTip(u: Float): Float {
+            if (u < 0.45f) return 0f                        // filling, level
+            val k = ((u - 0.45f) / 0.55f).coerceIn(0f, 1f)
+            return BUCKET_POUR * (k * k * (3f - 2f * k))
+        }
+
         // See-saw geometry. ONE definition, shared by the builder that bakes
         // the ball's path and the renderer that draws the plank, so the two
         // can never drift apart — which is precisely how the old version ended
