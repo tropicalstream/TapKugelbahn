@@ -129,6 +129,17 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
      */
     fun swipe(dir: Int) {
         val step = if (dir == SW_BACK || dir == SW_DOWN) -1 else 1
+        // On the title screen a swipe picks the machine rather than the camera,
+        // and the machine REBUILDS as you choose — so what is winding away
+        // behind the card is the one you are about to play, not a mock-up.
+        if (state == GameState.TITLE) {
+            val next = ((level - 1 + step + Machine.LEVELS) % Machine.LEVELS) + 1
+            if (next != level) {
+                loadLevel(next, toTitle = true)
+                host.sfx(S_DING, 1.15f + 0.12f * next, 0.75f)
+            }
+            return
+        }
         view = (view + step + VIEW_NAMES.size) % VIEW_NAMES.size
         viewFlash = 1.6f
         host.sfx(S_CLACK, 1.8f, 0.35f)

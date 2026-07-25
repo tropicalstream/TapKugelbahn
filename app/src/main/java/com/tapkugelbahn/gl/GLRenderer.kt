@@ -76,6 +76,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     private val ballScratch = FloatArray(3)
     private val chunkOn = ArrayList<Boolean>()
     private var footprintsLogged = false
+    private val ROMAN = arrayOf("I", "II", "III")
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -182,7 +183,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         Log.i("TapKugelbahn", "machine L${game.level}: ${m.length.toInt()}m track, $staticCount static verts")
         if (!footprintsLogged) {
             footprintsLogged = true
-            for (line in Steps.report().trim().split("\n")) Log.i("TapKugelbahn", line)
+            for (line in (Steps.levelReport() + Steps.report()).trim().split("\n")) Log.i("TapKugelbahn", line)
         }
     }
 
@@ -282,7 +283,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
             mode = if (lead == null) 1 else autoSub
         } else mode = game.view
 
-        val tx: Float; val ty: Float; val tz: Float          // target eye
+        var tx: Float; var ty: Float; var tz: Float          // target eye
         var lx: Float; var ly: Float; var lz: Float          // target look
         if (lead != null) { lead.let { m.pos(it.s, bp); bp[1] = it.pos[1]; bp[0] = it.pos[0]; bp[2] = it.pos[2] } }
         else { bp[0] = m.center[0]; bp[1] = m.center[1]; bp[2] = m.center[2] }
@@ -316,6 +317,19 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 lz = bp[2] * 0.7f + m.center[2] * 0.3f
             }
         }
+
+        // The title screen gets its own framing: a slow wide orbit that holds
+        // the WHOLE sculpture in shot, tilted down a little so the tower reads
+        // as a tower. The in-game vantages all sit close to the ball, which is
+        // right when you are watching a ball and wrong when you are choosing a
+        // machine — the rails filled the frame and swamped the cards.
+        if (game.state == GameState.TITLE) {
+            val az = orbit * 0.42f
+            val rr = m.radius * 2.15f + 1.4f
+            tx = sin(az) * rr; ty = m.center[1] + m.radius * 0.55f; tz = cos(az) * rr
+            lx = m.center[0]; ly = m.center[1] - m.radius * 0.06f; lz = m.center[2]
+        }
+
         // critically-damped style smoothing; a manual swipe snaps most of the way
         val snap = game.view != lastView
         lastView = game.view
@@ -761,16 +775,64 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         StrokeFont.draw(s, x, y, scale, sink)
     }
 
+    /** Axis-aligned HUD rectangle, in the ortho 640x480 frame. */
+    private fun box(x0: Float, y0: Float, x1: Float, y1: Float,
+                    r: Float, g: Float, b: Float, a: Float) {
+        hud.line(x0, y0, 0f, x1, y0, 0f, r, g, b, a)
+        hud.line(x1, y0, 0f, x1, y1, 0f, r, g, b, a)
+        hud.line(x1, y1, 0f, x0, y1, 0f, r, g, b, a)
+        hud.line(x0, y1, 0f, x0, y0, 0f, r, g, b, a)
+    }
+
+    /** A pair of hairlines under the title. */
+    private fun rule(x0: Float, y0: Float, x1: Float, y1: Float,
+                     r: Float, g: Float, b: Float, a: Float) {
+        hud.line(x0, y1, 0f, x1, y1, 0f, r, g, b, a)
+        hud.line(x0 + 40f, y1 + 5f, 0f, x1 - 40f, y1 + 5f, 0f, r, g, b, a * 0.5f)
+    }
+
     private fun buildHud() {
         hud.reset()
         val pulse = 0.55f + 0.45f * sin(game.time * 4f)
         when (game.state) {
             GameState.TITLE -> {
-                text("TAPKUGELBAHN", 320f, 120f, 4.2f, 1f, 0.72f, 0.25f)
-                text("LEVEL ${game.level} · ${Machine.NAMES[game.level - 1]}", 320f, 175f, 1.9f, 0.6f, 0.85f, 1f)
-                text("TAP TO START", 320f, 260f, 2.4f, 1f, 1f, 1f, pulse)
-                text("TAP DROP BALLS · SWIPE VIEW", 320f, 320f, 1.35f, 0.6f, 0.7f, 0.8f, 0.9f)
-                text("DOUBLE-TAP FOR THE NEXT MACHINE WHEN A BALL COMES HOME", 320f, 348f, 1.35f, 0.6f, 0.7f, 0.8f, 0.9f)
+                // The machine itself is the backdrop, running its attract balls,
+                // and it REBUILDS as you swipe — so the sculpture winding away
+                // behind these cards is the one you are about to play.
+                text("TAPKUGELBAHN", 320f, 86f, 4.2f, 1f, 0.72f, 0.25f)
+                rule(120f, 86f, 520f, 96f, 1f, 0.72f, 0.25f, 0.5f)
+                text("A KINETIC ROLLING-BALL SCULPTURE", 320f, 118f, 1.3f, 0.55f, 0.68f, 0.82f, 0.9f)
+
+                val sel = game.level
+                for (l in 1..Machine.LEVELS) {
+                    val cx = 320f + (l - sel) * 176f
+                    if (cx < 40f || cx > 600f) continue
+                    val on = l == sel
+                    // the chosen card sits forward: brighter, taller, named
+                    val hw = if (on) 82f else 66f
+                    val hh = if (on) 52f else 40f
+                    val a = if (on) 1f else 0.32f
+                    val cy = 210f
+                    box(cx - hw, cy - hh, cx + hw, cy + hh,
+                        if (on) 1f else 0.5f, if (on) 0.82f else 0.6f, if (on) 0.4f else 0.7f, a)
+                    text(ROMAN[l - 1], cx, cy - hh + 30f, if (on) 2.6f else 1.9f,
+                        1f, 0.86f, 0.42f, a)
+                    if (on) {
+                        text(Machine.NAMES[l - 1], cx, cy + 8f, 1.45f, 0.75f, 0.92f, 1f, 1f)
+                        text("${Steps.stepsFor(l).size} STEPS", cx, cy + 30f, 1.15f, 0.6f, 0.72f, 0.85f, 1f)
+                        text("${game.machine.length.toInt()} M", cx, cy + 48f, 1.15f, 0.6f, 0.72f, 0.85f, 1f)
+                    }
+                }
+                // which of the three, at a glance
+                for (l in 1..Machine.LEVELS) {
+                    val dx = 320f + (l - 2) * 22f
+                    val on = l == sel
+                    box(dx - 5f, 286f, dx + 5f, 296f, 1f, 0.82f, 0.4f, if (on) 1f else 0.28f)
+                }
+
+                text("SWIPE TO CHOOSE", 320f, 330f, 1.5f, 0.6f, 0.85f, 1f, 0.95f)
+                text("TAP TO START", 320f, 372f, 2.6f, 1f, 1f, 1f, pulse)
+                text("TAP DROPS A BALL · SWIPE CHANGES THE VIEW", 320f, 424f, 1.2f, 0.5f, 0.6f, 0.72f, 0.85f)
             }
             GameState.RUN, GameState.COMPLETE, GameState.FINALE -> {
                 text("L${game.level} ${Machine.NAMES[game.level - 1]}", 14f, 40f, 1.6f, 0.65f, 0.85f, 1f, 1f, center = false)

@@ -49,6 +49,54 @@ object Steps {
     )
 
     /**
+     * Teaching order. Each machine takes a prefix of this list, so a step is
+     * always introduced alongside everything before it and the sequence builds
+     * rather than jumping about: the plain gravity tricks first, then the ones
+     * that strike or hold the ball, then the big rotating machinery.
+     */
+    private val PROGRESSION = intArrayOf(
+        0,  // gravity funnel — the whirl
+        1,  // xylophone     — it sings
+        12, // loop          — the first spectacle
+        2,  // snake         — weaving
+        13, // corkscrew     — winding descent
+        3,  // pachinko      — caroms
+        5,  // see-saw       — it teeters
+        6,  // tipping bucket— it carries
+        4,  // cradle        — it strikes
+        11, // trommel       — it tumbles
+        7,  // gauss cannon  — it fires
+        8,  // ferris wheel  — it lifts and delivers
+        9,  // double spiral — the long fall
+        10  // screw         — the climb
+    )
+
+    const val LEVELS = 3
+    val NAMES = arrayOf("ERSTE BAHN", "PENDELWERK", "DAS GROSSE WERK")
+
+    /**
+     * Which steps a level contains: 70% of the catalogue, then 90%, then all
+     * of it. Always a prefix of PROGRESSION, so every machine is the previous
+     * one plus more rather than a different selection.
+     */
+    fun stepsFor(level: Int): IntArray {
+        val frac = when (level.coerceIn(1, LEVELS)) {
+            1 -> 0.70f
+            2 -> 0.90f
+            else -> 1.0f
+        }
+        val n = Math.round(PROGRESSION.size * frac).coerceIn(1, PROGRESSION.size)
+        return PROGRESSION.copyOfRange(0, n)
+    }
+
+    fun nameOf(id: Int): String = CATALOGUE.first { it.first == id }.second
+
+    /** Emit one step, by id, into a builder at its current cursor. */
+    fun emit(b: TrackBuilder, id: Int) {
+        CATALOGUE.first { it.first == id }.third.invoke(b)
+    }
+
+    /**
      * Run every generator in isolation and report what it did to the cursor.
      * Measured against the real builder, so it cannot drift from the code the
      * machine is actually made of.
@@ -74,6 +122,20 @@ object Steps {
             arc = model.length,
             dYaw = dYaw
         )
+    }
+
+    /** What each machine is made of — checked against the 70/90/100 split. */
+    fun levelReport(): String {
+        val sb = StringBuilder("LEVELS\n")
+        for (l in 1..LEVELS) {
+            val ids = stepsFor(l)
+            sb.append(String.format("  L%d %-16s %2d/%2d steps (%.0f%%): ",
+                l, NAMES[l - 1], ids.size, PROGRESSION.size,
+                100f * ids.size / PROGRESSION.size))
+            sb.append(ids.joinToString(", ") { nameOf(it) })
+            sb.append('\n')
+        }
+        return sb.toString()
     }
 
     /** One-line-per-step dump, for reading footprints off the device log. */
